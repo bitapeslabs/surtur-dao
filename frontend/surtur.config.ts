@@ -8,11 +8,9 @@
  * dev).
  */
 
-// Test network — the two nodes run_test_nodes.sh starts.
-const DEFAULT_NODES = [
-  'http://localhost:3007',
-  'http://localhost:3008',
-];
+// Production network. For local testing set NEXT_PUBLIC_SURTUR_NODES to
+// "http://localhost:3007,http://localhost:3008" (run_test_nodes.sh).
+const DEFAULT_NODES = ['https://surtur.alkanode.com'];
 
 const raw = process.env.NEXT_PUBLIC_SURTUR_NODES?.trim();
 

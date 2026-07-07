@@ -241,6 +241,14 @@ body {
 }
 
 /* Read-only rendering (proposal detail) — flush with the card padding. */
+/* Milkdown sometimes serializes a stray empty leading paragraph; hide it
+   in read-only views (ProseMirror renders "empty" as a lone trailing-break,
+   so :empty alone doesn't catch it). */
+.oa-markdown-view .milkdown .ProseMirror > p:first-child:empty,
+.oa-markdown-view .milkdown .ProseMirror > p:first-child:has(> br.ProseMirror-trailingBreak:only-child) {
+  display: none;
+}
+
 .oa-markdown-view .milkdown .ProseMirror {
   padding: 0;
 }

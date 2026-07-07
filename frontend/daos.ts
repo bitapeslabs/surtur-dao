@@ -82,14 +82,12 @@ export const DAOS: DaoDefinition[] = [
     // threshold), then a deliberately tiny test threshold — raise it via a
     // NEW fork entry (e.g. { height: <future>, pctg: 0.5 }) for production.
     proposalThreshold: [
-      { height: 0, pctg: 0 },
-      { height: 957018, pctg: 0.025 },
+      { height: 0, pctg: 0.01 },
     ],
     // 40% before the test fork, 0.05% after — deliberately tiny so the
     // passed-proposal → resolution flow is testable with a small wallet.
     votePassThreshold: [
       { height: 0, pctg: 40 },
-      { height: 957018, pctg: 0.025 },
     ],
     espoNetwork: 'mainnet',
   },

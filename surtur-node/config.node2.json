@@ -1,0 +1,6 @@
+{
+  "port": 3008,
+  "selfUrl": "http://localhost:3008",
+  "databaseFile": "./data/node-3008.sqlite",
+  "orchestratorUrl": "http://localhost:3002/api/orchestrator"
+}

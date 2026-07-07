@@ -1,0 +1,41 @@
+{
+  "name": "@surtur/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/ensure-port.mjs 3002 && next dev -p 3002",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@alkanes/ts-sdk": "https://pkg.alkanes.build/dist/@alkanes/ts-sdk?v=0.1.6-f6ec381",
+    "@bitcoinerlab/secp256k1": "^1.2.0",
+    "@milkdown/crepe": "^7.15.5",
+    "@milkdown/kit": "7.21.2",
+    "@surtur/shared": "workspace:*",
+    "@tanstack/react-query": "^5.101.2",
+    "bitcoinjs-lib": "^7.0.1",
+    "lucide-react": "^0.556.0",
+    "next": "^16.1.6",
+    "nextjs-toploader": "^3.9.17",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "subfrost-connect": "link:./subfrost-connect",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
+    "@types/node": "^20.19.34",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "buffer": "^6.0.3",
+    "process": "^0.11.10",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3"
+  }
+}

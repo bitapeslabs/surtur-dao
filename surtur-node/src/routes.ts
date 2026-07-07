@@ -1,0 +1,307 @@
+/**
+ * HTTP surface. Validation on every POST (never trust the sender, client
+ * or peer alike):
+ *   proposals — shared zod shape, id = sha256(content), BIP-322 proposer
+ *   signature, known+enabled DAO, transfer addresses valid for the DAO's
+ *   network, proposer meets the DAO's threshold at the start block (espo
+ *   versioned RPC).
+ *   votes — shared zod shape, canonical message, BIP-322 voter signature,
+ *   proposal known, voter holds any amount of the voting token.
+ * Accepted records are relayed to all known peers; already-known records
+ * are acknowledged (`known: true`) and NOT re-relayed.
+ */
+
+import { Router, type Request, type Response } from 'express';
+import {
+  isValidAddress,
+  proposalBundleSchema,
+  resolutionWireSchema,
+  verifyProposalBundle,
+  verifyResolutionWire,
+  verifyVoteWire,
+  voteWireSchema,
+  type ProposalBundle,
+  type ResolutionWire,
+  type VoteWire,
+} from '@surtur/shared';
+import * as db from './db';
+import { computeVerdict, fetchEspoTip, proposerMeetsThreshold, voterHoldsToken } from './espo';
+import { relayToPeers } from './relay';
+
+export const router = Router();
+
+router.get('/health', (_req, res) => {
+  res.json({ ok: true, service: 'surtur-node' });
+});
+
+/**
+ * Surtur-specific ping — the frontend's Nodes page measures round-trip
+ * latency against this (the `pong: 'surtur'` marker distinguishes a real
+ * surtur node from any random HTTP server on the whitelist).
+ */
+router.get('/surtur/ping', (_req, res) => {
+  res.json({ ok: true, pong: 'surtur', ts: Date.now() });
+});
+
+// ---- proposals --------------------------------------------------------
+
+router.get('/proposals', async (req: Request, res: Response) => {
+  try {
+    const daoId = typeof req.query.dao === 'string' ? req.query.dao : undefined;
+    const rows = await db.listProposals(daoId);
+    await refreshVerdicts(rows);
+    // METADATA ONLY: the list drops body/bodyZh (potentially megabytes of
+    // base64 images) and the signature — the full bundle, verifiable
+    // end-to-end, is served by GET /proposals/:id.
+    const proposals = rows.map(({ proposal, status }) => {
+      const { body: _body, bodyZh: _bodyZh, ...meta } = proposal;
+      return { proposal: meta, status };
+    });
+    res.json({ ok: true, proposals });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+router.get('/proposals/:id', async (req: Request, res: Response) => {
+  try {
+    const row = await db.getProposal(req.params.id);
+    if (!row) {
+      res.status(404).json({ ok: false, error: 'not found' });
+      return;
+    }
+    await refreshVerdicts([row]);
+    res.json({ ok: true, ...row });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+router.post('/proposals', async (req: Request, res: Response) => {
+  try {
+    const parsed = proposalBundleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? 'invalid' });
+      return;
+    }
+    const bundle = parsed.data as ProposalBundle;
+    const { proposal } = bundle;
+
+    // Dedup FIRST — a known record ends the gossip here.
+    if (await db.getProposal(proposal.id)) {
+      res.json({ ok: true, known: true });
+      return;
+    }
+
+    const dao = await db.getDao(proposal.daoId);
+    if (!dao) {
+      res.status(400).json({ ok: false, error: `unknown dao: ${proposal.daoId}` });
+      return;
+    }
+    // Disabled DAOs accept no proposals — enforced here, not just in the UI.
+    if (!dao.enabled) {
+      res.status(403).json({ ok: false, error: `dao is disabled: ${proposal.daoId}` });
+      return;
+    }
+    for (const t of proposal.transfers) {
+      if (!isValidAddress(t.address, dao.espoNetwork)) {
+        res.status(400).json({ ok: false, error: `invalid transfer address: ${t.address}` });
+        return;
+      }
+    }
+    if (!isValidAddress(proposal.proposer, dao.espoNetwork)) {
+      res.status(400).json({ ok: false, error: 'invalid proposer address' });
+      return;
+    }
+
+    const integrity = verifyProposalBundle(bundle);
+    if (!integrity.ok) {
+      res.status(400).json({ ok: false, error: integrity.error });
+      return;
+    }
+
+    if (!(await proposerMeetsThreshold(dao, proposal.proposer, proposal.startBlock))) {
+      res.status(403).json({ ok: false, error: 'proposer below proposal threshold' });
+      return;
+    }
+
+    await db.insertProposal(proposal, bundle.signature);
+    res.json({ ok: true });
+    void relayToPeers('/proposals', bundle);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+// ---- votes ------------------------------------------------------------
+
+router.get('/votes', async (req: Request, res: Response) => {
+  try {
+    const proposalId = typeof req.query.proposal === 'string' ? req.query.proposal : '';
+    if (!proposalId) {
+      res.status(400).json({ ok: false, error: 'proposal query param required' });
+      return;
+    }
+    res.json({ ok: true, votes: await db.listVotes(proposalId) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+router.post('/votes', async (req: Request, res: Response) => {
+  try {
+    const parsed = voteWireSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? 'invalid' });
+      return;
+    }
+    const vote = parsed.data as VoteWire;
+
+    if (await db.getVote(vote.proposalId, vote.address)) {
+      res.json({ ok: true, known: true });
+      return;
+    }
+
+    const stored = await db.getProposal(vote.proposalId);
+    if (!stored) {
+      res.status(400).json({ ok: false, error: 'unknown proposal' });
+      return;
+    }
+    const dao = await db.getDao(vote.daoId);
+    if (!dao || stored.proposal.daoId !== vote.daoId) {
+      res.status(400).json({ ok: false, error: 'dao mismatch' });
+      return;
+    }
+
+    const integrity = verifyVoteWire(vote, stored.proposal.title);
+    if (!integrity.ok) {
+      res.status(400).json({ ok: false, error: integrity.error });
+      return;
+    }
+
+    if (!(await voterHoldsToken(dao, vote.address))) {
+      res.status(403).json({ ok: false, error: 'voter holds no voting token' });
+      return;
+    }
+
+    await db.insertVote(vote);
+    res.json({ ok: true });
+    void relayToPeers('/votes', vote);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+// ---- resolutions ------------------------------------------------------
+
+router.get('/resolutions', async (req: Request, res: Response) => {
+  try {
+    const proposalId = typeof req.query.proposal === 'string' ? req.query.proposal : '';
+    if (!proposalId) {
+      res.status(400).json({ ok: false, error: 'proposal query param required' });
+      return;
+    }
+    res.json({ ok: true, resolution: await db.getResolution(proposalId) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+router.post('/resolutions', async (req: Request, res: Response) => {
+  try {
+    const parsed = resolutionWireSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? 'invalid' });
+      return;
+    }
+    const resolution = parsed.data as ResolutionWire;
+
+    if (await db.getResolution(resolution.proposalId)) {
+      res.json({ ok: true, known: true });
+      return;
+    }
+
+    const stored = await db.getProposal(resolution.proposalId);
+    if (!stored) {
+      res.status(400).json({ ok: false, error: 'unknown proposal' });
+      return;
+    }
+    const dao = await db.getDao(resolution.daoId);
+    if (!dao || stored.proposal.daoId !== resolution.daoId) {
+      res.status(400).json({ ok: false, error: 'dao mismatch' });
+      return;
+    }
+
+    // The proposal must actually have PASSED (compute the verdict now if
+    // the end block went by without a read).
+    await refreshVerdicts([stored]);
+    if (stored.status !== 'passed') {
+      res.status(403).json({ ok: false, error: `proposal is not passed (${stored.status})` });
+      return;
+    }
+
+    // ONLY the DAO's resolver may resolve — this is the node-side check
+    // the frontend deliberately relies on.
+    if (!dao.resolverSigner || resolution.address !== dao.resolverSigner) {
+      res.status(403).json({ ok: false, error: 'signer is not the dao resolver' });
+      return;
+    }
+
+    const integrity = verifyResolutionWire(resolution);
+    if (!integrity.ok) {
+      res.status(400).json({ ok: false, error: integrity.error });
+      return;
+    }
+
+    await db.insertResolution(resolution);
+    res.json({ ok: true });
+    void relayToPeers('/resolutions', resolution);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+// ---- lazy verdicts ----------------------------------------------------
+
+const verdictInFlight = new Set<string>();
+
+/**
+ * Open proposals whose end block has passed get their verdict computed
+ * from this node's stored votes + espo pinned at the end block, then
+ * persisted (immutable past-block data → computed once).
+ */
+async function refreshVerdicts(
+  rows: Array<{ proposal: { id: string; daoId: string; endBlock: number }; status: string }>,
+): Promise<void> {
+  const open = rows.filter((r) => r.status === 'open');
+  if (open.length === 0) return;
+
+  const daoIds = [...new Set(open.map((r) => r.proposal.daoId))];
+  for (const daoId of daoIds) {
+    const dao = await db.getDao(daoId);
+    if (!dao) continue;
+    let tip: number;
+    try {
+      tip = await fetchEspoTip(dao.espoUrl);
+    } catch {
+      continue;
+    }
+    for (const row of open) {
+      if (row.proposal.daoId !== daoId) continue;
+      if (row.proposal.endBlock > tip) continue;
+      if (verdictInFlight.has(row.proposal.id)) continue;
+      verdictInFlight.add(row.proposal.id);
+      try {
+        const votes = await db.listVotes(row.proposal.id);
+        const forVoters = votes.filter((v) => v.choice === 'for').map((v) => v.address);
+        const verdict = await computeVerdict(dao, row.proposal.endBlock, forVoters);
+        await db.setProposalStatus(row.proposal.id, verdict);
+        row.status = verdict;
+      } catch (e) {
+        console.warn(`[verdict] ${row.proposal.id}: ${(e as Error).message}`);
+      } finally {
+        verdictInFlight.delete(row.proposal.id);
+      }
+    }
+  }
+}

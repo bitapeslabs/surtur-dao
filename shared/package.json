@@ -1,0 +1,21 @@
+{
+  "name": "@surtur/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bitcoinerlab/secp256k1": "^1.2.0",
+    "bitcoinjs-lib": "^7.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.34",
+    "typescript": "^5.9.3"
+  }
+}

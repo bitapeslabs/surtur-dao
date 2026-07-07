@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+
+# TypeScript incremental state
+*.tsbuildinfo
+next-env.d.ts
+
+# Surtur node runtime state (embedded sqlite databases)
+surtur-node/data/
+
+# Logs
+*.log
+
+# Local environment
+.env
+.env.*
+
+# OS noise
+.DS_Store

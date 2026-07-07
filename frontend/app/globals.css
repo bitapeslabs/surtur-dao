@@ -1,0 +1,296 @@
+@import "tailwindcss";
+/* Milkdown (Crepe) theme — imported HERE, not in the editor component, so
+   the .milkdown variable remap further down this file wins the cascade. */
+@import "@milkdown/crepe/theme/common/style.css";
+@import "@milkdown/crepe/theme/frame.css";
+
+/*
+ * Design language modeled on openai.com — quiet, typographic, generous
+ * whitespace. Dark only — the theme toggle was replaced by the language
+ * toggle and the light palette was removed.
+ *
+ * Hover convention (borrowed from subfrost-app): ON-hover is instant
+ * (`hover:transition-none`) with a pointer cursor; OFF-hover animates back
+ * over 400ms with the sf easing curve.
+ */
+
+:root {
+  color-scheme: dark;
+  --oa-bg: #0d0d0d;
+  --oa-bg-subtle: #171719;
+  --oa-bg-raised: #1e1e21;
+  --oa-ink: #ececf1;
+  --oa-ink-secondary: #a0a0ab;
+  --oa-ink-tertiary: #6e6e80;
+  --oa-border: #29292e;
+  --oa-border-faint: rgba(255, 255, 255, 0.03);
+  /* Inputs are borderless; on the page background they share the raised
+     surface color (same as the markdown editor card). */
+  --oa-input-bg: var(--oa-bg-raised);
+  --oa-danger: #f0857c;
+  --oa-success: #6ee7a8;
+  /* Primary CTA inverts per theme: white-on-dark / black-on-light. */
+  --oa-btn-bg: #ececf1;
+  --oa-btn-bg-hover: #ffffff;
+  --oa-btn-ink: #0d0d0d;
+}
+
+body {
+  background: var(--oa-bg);
+  color: var(--oa-ink);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Instant on-hover, animated off-hover (subfrost-app convention).
+   Declared with @utility so it is composable via @apply (Tailwind v4). */
+@utility oa-hoverable {
+  cursor: pointer;
+  transition: all 400ms cubic-bezier(0, 0, 0, 1);
+  &:hover {
+    transition: none;
+  }
+}
+
+/* Cards / tiles */
+.oa-card {
+  @apply rounded-2xl bg-[color:var(--oa-bg-raised)] border border-[color:var(--oa-border)];
+}
+
+.oa-tile {
+  @apply rounded-2xl bg-[color:var(--oa-bg-subtle)];
+}
+
+/* Buttons — pill primary (inverted per theme), subtle pill secondary */
+.oa-btn-primary {
+  @apply oa-hoverable inline-flex items-center justify-center gap-2 rounded-full bg-[color:var(--oa-btn-bg)] text-[color:var(--oa-btn-ink)] text-sm font-medium px-5 py-2.5 hover:bg-[color:var(--oa-btn-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[color:var(--oa-btn-bg)];
+}
+
+.oa-btn-secondary {
+  @apply oa-hoverable inline-flex items-center justify-center gap-2 rounded-full bg-[color:var(--oa-bg-subtle)] text-[color:var(--oa-ink)] text-sm font-medium px-5 py-2.5 hover:bg-[color:var(--oa-border)] disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.oa-btn-ghost {
+  @apply oa-hoverable inline-flex items-center justify-center gap-1.5 rounded-full text-sm font-medium px-3 py-1.5 text-[color:var(--oa-ink-secondary)] hover:text-[color:var(--oa-ink)] hover:bg-[color:var(--oa-bg-subtle)];
+}
+
+/* Compact action button (subfrost asset-row actions: px-3 py-1.5 text-xs) */
+.oa-btn-small {
+  @apply oa-hoverable inline-flex items-center gap-1.5 rounded-lg bg-[color:var(--oa-btn-bg)] text-[color:var(--oa-btn-ink)] text-xs font-semibold px-3 py-1.5 hover:bg-[color:var(--oa-btn-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[color:var(--oa-btn-bg)];
+}
+
+.oa-btn-small-secondary {
+  @apply oa-hoverable inline-flex items-center gap-1.5 rounded-lg bg-[color:var(--oa-bg-raised)] border border-[color:var(--oa-border)] text-[color:var(--oa-ink)] text-xs font-semibold px-3 py-1.5 hover:bg-[color:var(--oa-border)] disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+/* Inputs — borderless (background contrast does the work); the border-width
+   stays so error states can paint it red without a layout shift. */
+.oa-input {
+  @apply w-full rounded-xl bg-[color:var(--oa-input-bg)] border border-transparent px-3.5 py-2.5 text-sm text-[color:var(--oa-ink)] placeholder:text-[color:var(--oa-ink-tertiary)] transition-colors focus:outline-none;
+}
+
+.oa-select {
+  @apply w-full rounded-xl bg-[color:var(--oa-input-bg)] border border-transparent px-3 py-2.5 text-sm text-[color:var(--oa-ink)] focus:outline-none;
+}
+
+.oa-label {
+  @apply block mb-1.5 text-xs font-medium text-[color:var(--oa-ink-secondary)];
+}
+
+/* Header nav link */
+.oa-nav-link {
+  @apply oa-hoverable text-sm font-medium text-[color:var(--oa-ink-secondary)] hover:text-[color:var(--oa-ink)] px-3 py-1.5 rounded-full;
+}
+
+.oa-nav-link-active {
+  @apply text-[color:var(--oa-ink)] bg-[color:var(--oa-bg-subtle)];
+}
+
+/* Hoverable list row (dropdown items, asset rows) */
+.oa-row {
+  @apply oa-hoverable hover:bg-[color:var(--oa-bg-subtle)];
+}
+
+/* Error-shake for toasts: a quick horizontal jolt before settling. */
+@keyframes oa-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-8px); }
+  30% { transform: translateX(7px); }
+  45% { transform: translateX(-5px); }
+  60% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+  90% { transform: translateX(1px); }
+}
+
+.oa-shake {
+  animation: oa-shake 450ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* Skeleton loader block — translucent ink so it contrasts with every
+   surface (page, tile, raised card) in both themes. */
+.oa-skel {
+  @apply animate-pulse rounded-md;
+  background: color-mix(in srgb, var(--oa-ink) 14%, transparent);
+}
+
+/* Modal */
+.oa-overlay {
+  @apply fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4;
+}
+
+/* Themed scrollbar (dropdown panels and other scrollable surfaces) */
+.oa-scroll {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: var(--oa-border) transparent;
+}
+
+.oa-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.oa-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.oa-scroll::-webkit-scrollbar-thumb {
+  background: var(--oa-border);
+  border-radius: 9999px;
+}
+
+.oa-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--oa-ink-tertiary);
+}
+
+/*
+ * Milkdown (Crepe, frame theme) — remap the crepe palette onto the oa
+ * variables so the editor follows the app's light/dark toggle and reads
+ * as part of the same surface system. Fonts inherit Inter from the page.
+ */
+.milkdown {
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--oa-ink);
+  --crepe-color-surface: var(--oa-bg-raised);
+  --crepe-color-surface-low: var(--oa-bg-subtle);
+  --crepe-color-on-surface: var(--oa-ink);
+  --crepe-color-on-surface-variant: var(--oa-ink-secondary);
+  /* Outline doubles as the toolbar/tooltip icon color and muted text —
+     must stay readable on the raised surface in both themes. */
+  --crepe-color-outline: var(--oa-ink-secondary);
+  --crepe-color-primary: var(--oa-ink);
+  --crepe-color-secondary: var(--oa-bg-subtle);
+  --crepe-color-on-secondary: var(--oa-ink);
+  --crepe-color-inverse: var(--oa-ink);
+  --crepe-color-on-inverse: var(--oa-bg);
+  --crepe-color-inline-code: var(--oa-danger);
+  --crepe-color-error: var(--oa-danger);
+  --crepe-color-hover: var(--oa-bg-subtle);
+  /* Text-selection highlight — translucent ink so it reads in both themes. */
+  --crepe-color-selected: color-mix(in srgb, var(--oa-ink) 25%, transparent);
+  --crepe-color-inline-area: var(--oa-bg-subtle);
+  --crepe-font-title: inherit;
+  --crepe-font-default: inherit;
+  --crepe-font-code: inherit;
+  --crepe-shadow-1: 0 1px 3px 1px rgba(0, 0, 0, 0.25);
+  --crepe-shadow-2: 0 2px 6px 2px rgba(0, 0, 0, 0.25);
+}
+
+/* Caret (prosemirror-virtual-cursor) — ink, i.e. white on dark, matching
+   the text; crepe defaults it to the outline color, which is too faint.
+   Doubled class beats crepe's `.milkdown .ProseMirror-focused` rule (and
+   keeps the selector distinct so the pipeline can't merge it away). */
+.milkdown .ProseMirror.ProseMirror-focused {
+  --prosemirror-virtual-cursor-color: var(--oa-ink);
+}
+
+/* The editable prosemirror surface: comfortable padding, no min-height wall. */
+.milkdown .ProseMirror {
+  padding: 16px 20px;
+}
+
+/* Editable editor: extra side gutters so the block handle (+ / drag) that
+   appears beside the hovered block stays inside the card — the handle is
+   two 32px buttons plus its offset, so it needs ~80px of room. */
+.oa-editor .milkdown .ProseMirror {
+  min-height: 220px;
+  padding: 20px 80px 28px;
+}
+
+@media (max-width: 640px) {
+  .oa-editor .milkdown .ProseMirror {
+    padding: 20px 44px 28px;
+  }
+}
+
+/* Keep crepe's floating block-edit UI (handle, slash menu) within the
+   editor's box instead of drifting over the page background. */
+.oa-editor .milkdown {
+  position: relative;
+  overflow: visible;
+}
+
+/* Read-only rendering (proposal detail) — flush with the card padding. */
+.oa-markdown-view .milkdown .ProseMirror {
+  padding: 0;
+}
+
+/* Read-only images: crepe's editing chrome (operation toolbar, resize
+   handles, caption input, upload panel) never shows… */
+.oa-markdown-view .milkdown .milkdown-image-block .image-wrapper .operation,
+.oa-markdown-view .milkdown .milkdown-image-block .image-wrapper .image-resize-handle,
+.oa-markdown-view .milkdown .milkdown-image-block .image-edit,
+.oa-markdown-view .milkdown .milkdown-image-block .caption-input {
+  display: none !important;
+}
+
+/* …instead the image opens a fit-to-screen lightbox on click. Hover (or
+   always, on touch devices) shows an expand badge — Phosphor
+   "arrows-out-simple" glyph on a dark pill. */
+.oa-markdown-view .milkdown img {
+  cursor: zoom-in;
+}
+
+.oa-markdown-view .milkdown .milkdown-image-block .image-wrapper {
+  position: relative;
+}
+
+.oa-markdown-view .milkdown .milkdown-image-block .image-wrapper::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  background-color: rgba(0, 0, 0, 0.55);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='%23ffffff'%3E%3Cpath d='M216,48V96a8,8,0,0,1-16,0V67.31l-42.34,42.35a8,8,0,0,1-11.32-11.32L188.69,56H160a8,8,0,0,1,0-16h48A8,8,0,0,1,216,48ZM98.34,146.34,56,188.69V160a8,8,0,0,0-16,0v48a8,8,0,0,0,8,8H96a8,8,0,0,0,0-16H67.31l42.35-42.34a8,8,0,0,0-11.32-11.32Z'/%3E%3C/svg%3E");
+  background-size: 16px 16px;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity 200ms;
+  pointer-events: none;
+}
+
+.oa-markdown-view .milkdown .milkdown-image-block .image-wrapper:hover::after {
+  opacity: 1;
+}
+
+/* Touch devices have no hover — show the badge permanently. */
+@media (hover: none) {
+  .oa-markdown-view .milkdown .milkdown-image-block .image-wrapper::after {
+    opacity: 1;
+  }
+}
+
+/* Read-only images can never look selected, whatever path selects them. */
+.oa-markdown-view .milkdown .milkdown-image-block,
+.oa-markdown-view .milkdown .milkdown-image-inline {
+  user-select: none;
+}
+
+.oa-markdown-view .milkdown .milkdown-image-block.selected,
+.oa-markdown-view .milkdown .ProseMirror-selectednode {
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}

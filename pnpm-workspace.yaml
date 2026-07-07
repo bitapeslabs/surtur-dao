@@ -1,0 +1,10 @@
+packages:
+  - frontend
+  - shared
+  - surtur-node
+
+allowBuilds:
+  # sharp is Next's optional image-optimizer native dep; approve its
+  # postinstall so pnpm's verify-deps-before-run check passes.
+  esbuild: true
+  sharp: true

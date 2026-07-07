@@ -1,0 +1,25 @@
+{
+  "name": "subfrost-connect",
+  "version": "0.1.0",
+  "description": "Vendor-side SDK for connecting to a SUBFROST wallet via window.open + postMessage (wallet selection and PSBT signature requests).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "license": "MIT"
+}

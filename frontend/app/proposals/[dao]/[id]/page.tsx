@@ -215,9 +215,6 @@ export default function ProposalDetailPage() {
               </span>
             )}
           </div>
-          <div className="mt-5">
-            <VoteButtons voting={voting} />
-          </div>
         </div>
 
         {proposalBody(proposal, locale).trim() ? (
@@ -316,6 +313,10 @@ export default function ProposalDetailPage() {
         )}
         </div>
       </section>
+
+      {/* Vote actions sit bare between the proposal document and the
+          voting/resolution cards — not wrapped in any surface. */}
+      <VoteButtons voting={voting} />
 
       <ResolutionSection dao={dao} proposal={proposal} />
 

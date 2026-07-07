@@ -75,22 +75,17 @@ function ProposalRow({
   proposal: Proposal;
   height: number | null;
 }) {
-  const router = useRouter();
   const { t, p, locale } = useI18n();
   const open = proposal.status === 'open';
   const blocksLeft =
     open && proposal.endBlock && height !== null ? proposal.endBlock - height : null;
 
-  // A div with router.push instead of a Link: the proposer link inside is a
-  // real <a> to espo.sh and anchors can't nest.
+  // The whole row is a real <a> (middle-click / cmd+click / open-in-new-tab
+  // all work). Anchors can't nest, so the proposer espo link inside is a
+  // span that window.opens instead.
   return (
-    <div
-      role="link"
-      tabIndex={0}
-      onClick={() => router.push(p(`/proposals/${dao.id}/${proposal.id}`))}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') router.push(p(`/proposals/${dao.id}/${proposal.id}`));
-      }}
+    <Link
+      href={p(`/proposals/${dao.id}/${proposal.id}`)}
       className="oa-row px-5 py-4 flex items-center justify-between gap-3 cursor-pointer"
     >
       <div className="min-w-0">
@@ -106,15 +101,25 @@ function ProposalRow({
         </div>
         <div className="mt-1 text-xs text-[color:var(--oa-ink-secondary)] truncate">
           {t('prop.proposer')}{' '}
-          <a
-            href={explorerAddressUrl(proposal.author)}
-            target="_blank"
-            rel="noopener noreferrer"
+          <span
+            role="link"
+            tabIndex={0}
             className="oa-hoverable text-[color:var(--oa-ink)] hover:underline"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.open(explorerAddressUrl(proposal.author), '_blank', 'noopener,noreferrer');
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(explorerAddressUrl(proposal.author), '_blank', 'noopener,noreferrer');
+              }
+            }}
           >
             {shortAddress(proposal.author)}
-          </a>
+          </span>
         </div>
       </div>
       <div className="flex items-center gap-3 shrink-0">
@@ -135,7 +140,7 @@ function ProposalRow({
         </div>
         <ChevronRight size={15} className="text-[color:var(--oa-ink-tertiary)]" />
       </div>
-    </div>
+    </Link>
   );
 }
 

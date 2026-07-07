@@ -36,7 +36,7 @@ import {
   totalTransferAmount,
 } from '@/lib/dao/format';
 import ProposalStatusPill from '@/components/ProposalStatusPill';
-import { proposalTitle } from '@/i18n';
+import { daoDescription, proposalTitle } from '@/i18n';
 import { useI18n } from '@/hooks/useI18n';
 import TokenIcon from '@/components/TokenIcon';
 import Skeleton from '@/components/Skeleton';
@@ -142,7 +142,7 @@ function ProposalRow({
 export default function DaoProposalsPage() {
   const params = useParams<{ dao: string }>();
   const dao = getDao(params?.dao);
-  const { t, p } = useI18n();
+  const { t, p, locale } = useI18n();
   const [page, setPage] = useState(1);
   const router = useRouter();
   // Below the proposal threshold → clicking New proposal shows a toast
@@ -296,7 +296,8 @@ export default function DaoProposalsPage() {
           <div>
             <div className="text-sm font-medium mb-1">{t('dao.noProposals')}</div>
             <p className="text-sm text-[color:var(--oa-ink-secondary)]">
-              {t('dao.createFirst', { symbol: dao.treasuryToken.symbol })}
+              {daoDescription(dao, locale) ??
+                t('dao.createFirst', { symbol: dao.treasuryToken.symbol })}
             </p>
           </div>
           <button type="button" className="oa-btn-secondary mt-2" onClick={handleNewProposal}>

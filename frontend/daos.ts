@@ -67,8 +67,10 @@ export const DAOS: DaoDefinition[] = [
   {
     id: 'alkanes',
     name: 'Alkanes Foundation',
-    description: 'Governs the DIESEL reserves — FIRE holders vote on treasury transfers.',
-    descriptionZh: '管理 DIESEL 储备 — 由 FIRE 持有者对金库转账进行投票。',
+    description:
+      'Governs Alkanes upgrades and available DIESEL reserves for ecosystem incentives - FIRE holders vote on the future of Alkanes.',
+    descriptionZh:
+      '管理 Alkanes 升级与用于生态激励的可用 DIESEL 储备 - 由 FIRE 持有者决定 Alkanes 的未来。',
     iconUrl: 'https://cdn.subfrost.io/alkanes/2_0',
     enabled: true,
     treasuryToken: { alkaneId: '2:0', symbol: 'DIESEL' },

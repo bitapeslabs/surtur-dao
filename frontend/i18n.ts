@@ -109,6 +109,36 @@ export const MESSAGES = {
   'prop.treasuryAfter': { en: 'Treasury after transfers', zh: '转账后金库余额' },
   'prop.closeImageAria': { en: 'Close image', zh: '关闭图片' },
 
+  // Wallet connect
+  'wallet.connectTitle': { en: 'Connect a wallet', zh: '连接钱包' },
+  'wallet.passportHint': {
+    en: 'Sign in with the SUBFROST webapp popup.',
+    zh: '通过 SUBFROST 网页应用弹窗登录。',
+  },
+  'wallet.mobileHint': {
+    en: 'Pair with the SUBFROST mobile app via QR.',
+    zh: '通过二维码与 SUBFROST 手机应用配对。',
+  },
+  'wallet.extensionsSection': { en: 'Browser extensions', zh: '浏览器扩展' },
+  'wallet.installed': { en: 'Installed', zh: '已安装' },
+  'wallet.notInstalled': { en: 'Not installed →', zh: '未安装 →' },
+  'wallet.mobileTitle': { en: 'Pair SUBFROST Mobile', zh: '配对 SUBFROST 手机应用' },
+  'wallet.pairingCode': { en: 'Pairing code', zh: '配对码' },
+  'wallet.mobileScanHint': {
+    en: 'Open the SUBFROST app on your phone and scan this code. Confirm the pairing code matches.',
+    zh: '在手机上打开 SUBFROST 应用并扫描此二维码，确认配对码一致。',
+  },
+  'wallet.mobileNoSend': {
+    en: 'Mobile sessions can vote and propose; sending from the portfolio is not available.',
+    zh: '手机会话可投票和创建提案；无法从资产页发送。',
+  },
+  'wallet.preparingPairing': { en: 'Preparing pairing…', zh: '正在准备配对…' },
+  'wallet.retryPairing': { en: 'Try again', zh: '重试' },
+  'portfolio.sendDisabledMobile': {
+    en: 'Sending is not supported with SUBFROST Mobile.',
+    zh: 'SUBFROST 手机应用不支持发送。',
+  },
+
   // Resolution
   'resolution.title': { en: 'Resolution', zh: '决议' },
   'resolution.waiting': { en: 'Waiting to be resolved', zh: '等待解决' },

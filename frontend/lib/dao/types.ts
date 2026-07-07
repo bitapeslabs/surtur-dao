@@ -72,11 +72,12 @@ export interface Vote {
   choice: VoteChoice;
   /**
    * Base64 signature over `message` from the SUBFROST keystore — raw ECDSA
-   * over sha256(message), verified against `publicKey` (not BIP-137/322).
+   * BIP-322 simple, verified against `address` by the surtur nodes.
+   * `publicKey` is informational and not all wallets expose it.
    */
   signature: string;
   /** Compressed public key hex of the voting account. */
-  publicKey: string;
+  publicKey?: string;
   /** The exact message that was signed (see buildVoteMessage). */
   message: string;
   /** ISO 8601 timestamp. */

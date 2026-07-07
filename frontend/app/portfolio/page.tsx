@@ -22,7 +22,7 @@ import { ALKANE_DECIMALS } from '@/lib/config';
 
 export default function PortfolioPage() {
   const { t } = useI18n();
-  const { hydrated, session, network, connect, connecting } = useVendorWallet();
+  const { hydrated, session, network, connect, connecting, canSend } = useVendorWallet();
   // Balances are fetched here (not in the wallet context) so the
   // spendable-outpoints call only fires on this page.
   const balances = useBalances(network, session?.account.address ?? null);
@@ -60,20 +60,30 @@ export default function PortfolioPage() {
   const toggle = (id: string) => setExpandedId((cur) => (cur === id ? null : id));
 
   // Compact actions — same size as the subfrost app's expanded asset row
-  // buttons (px-3 py-1.5 text-xs, left-aligned).
+  // buttons (px-3 py-1.5 text-xs, left-aligned). Send is policy-gated:
+  // extension wallets + the SUBFROST passport can send; the mobile app
+  // cannot (canSend === false).
   const actionButtons = (asset: ModalAsset) => (
-    <div className="flex gap-2 px-5 pb-4">
-      <button
-        type="button"
-        className="oa-btn-small"
-        onClick={(e) => {
-          e.stopPropagation();
-          setSendAsset(asset);
-        }}
-      >
-        <Send size={14} />
-        {t('portfolio.send')}
-      </button>
+    <div className="flex flex-col gap-1.5 px-5 pb-4">
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="oa-btn-small"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (canSend) setSendAsset(asset);
+          }}
+          disabled={!canSend}
+        >
+          <Send size={14} />
+          {t('portfolio.send')}
+        </button>
+      </div>
+      {!canSend && (
+        <span className="text-xs text-[color:var(--oa-ink-tertiary)]">
+          {t('portfolio.sendDisabledMobile')}
+        </span>
+      )}
     </div>
   );
 

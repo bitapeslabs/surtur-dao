@@ -41,7 +41,7 @@ export default function SendModal({
   balances: BalancesState;
   onClose: () => void;
 }) {
-  const { session, network, connector } = useVendorWallet();
+  const { session, network, canSend, signPsbt: signWalletPsbt, openSignPopup } = useVendorWallet();
   const { t } = useI18n();
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
@@ -55,7 +55,7 @@ export default function SendModal({
   const busy =
     status.phase === 'building' || status.phase === 'signing' || status.phase === 'broadcasting';
   const canSubmit =
-    !busy && !!session && !!connector && recipient.trim().length > 0 && Number(amount) > 0 && Number(feeRate) > 0;
+    !busy && !!session && canSend && recipient.trim().length > 0 && Number(amount) > 0 && Number(feeRate) > 0;
 
   const maxAmount = useMemo(
     () => (asset.kind === 'btc' ? formatSats(asset.balanceSats) : formatAlkaneAmount(asset.balance)),
@@ -63,11 +63,11 @@ export default function SendModal({
   );
 
   const handleSend = async () => {
-    if (!canSubmit || !session || !connector) return;
+    if (!canSubmit || !session) return;
     const fee = Math.max(1, Math.round(Number(feeRate)));
     const recipientAddress = recipient.trim();
     // Pre-open the popup synchronously in the click gesture (Safari-safe).
-    const popup = connector.openPopup('sign');
+    const popup = openSignPopup('sign');
     try {
       setStatus({ phase: 'building' });
       let unsignedPsbt: string;
@@ -116,7 +116,7 @@ export default function SendModal({
       }
 
       setStatus({ phase: 'signing' });
-      const { signedPsbtBase64 } = await connector.signPsbt(
+      const signedPsbtBase64 = await signWalletPsbt(
         { psbtBase64: unsignedPsbt, label, overview },
         { popup },
       );

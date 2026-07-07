@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import NextTopLoader from 'nextjs-toploader';
 import { VendorWalletProvider } from '@/context/VendorWalletContext';
+import ConnectWalletModal from '@/components/ConnectWalletModal';
 import QueryProvider from '@/components/QueryProvider';
 import Header from '@/components/Header';
 import MobileBottomNav from '@/components/MobileBottomNav';
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Spacer so fixed bottom nav doesn't cover content on mobile. */}
           <div className="h-16 md:hidden" />
           <MobileBottomNav />
+          <ConnectWalletModal />
         </VendorWalletProvider>
         </QueryProvider>
       </body>

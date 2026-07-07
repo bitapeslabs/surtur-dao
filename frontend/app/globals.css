@@ -111,6 +111,18 @@ body {
   @apply oa-hoverable hover:bg-[color:var(--oa-bg-subtle)];
 }
 
+/* Wallet-picker option cards — oa-card visuals plus a hover state that
+   actually applies (plain .oa-card outranks layered hover: utilities). */
+.oa-wallet-option {
+  @apply oa-hoverable rounded-2xl border border-[color:var(--oa-border)] bg-[color:var(--oa-bg-raised)];
+}
+.oa-wallet-option:hover {
+  background: var(--oa-bg-subtle);
+}
+.oa-wallet-option:disabled {
+  @apply opacity-60 cursor-not-allowed;
+}
+
 /* Error-shake for toasts: a quick horizontal jolt before settling. */
 @keyframes oa-shake {
   0%, 100% { transform: translateX(0); }

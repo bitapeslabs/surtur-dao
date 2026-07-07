@@ -41,7 +41,7 @@ export default function ResolutionSection({
   proposal: Proposal;
 }) {
   const { t } = useI18n();
-  const { session, connector } = useVendorWallet();
+  const { session, signMessage: signWalletMessage, openSignPopup } = useVendorWallet();
   const queryClient = useQueryClient();
 
   const [editing, setEditing] = useState(false);
@@ -60,21 +60,22 @@ export default function ResolutionSection({
     !!session && !!dao.resolverSigner && session.account.address === dao.resolverSigner;
 
   const submit = async () => {
-    if (!session || !connector) return;
+    if (!session) return;
     const markdown = draftRef.current.trim();
     if (!markdown) {
       setError(t('resolution.empty'));
       return;
     }
     setError(null);
-    // Pre-open the signing popup in the click gesture (Safari-safe).
-    const popup = connector.openPopup('signMessage');
+    // Pre-open the passport popup in the click gesture (Safari-safe);
+    // null for extension/mobile wallets.
+    const popup = openSignPopup('signMessage');
     setSubmitting(true);
     try {
       const resolutionId = computeResolutionId(markdown);
-      const { signature, address } = await connector.signMessage(
-        { message: buildResolutionSignMessage(proposal.id, resolutionId) },
-        { popup: popup ?? undefined },
+      const { signature, address } = await signWalletMessage(
+        buildResolutionSignMessage(proposal.id, resolutionId),
+        { popup },
       );
       await getDaoStore().publishResolution({
         proposalId: proposal.id,

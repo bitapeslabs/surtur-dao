@@ -73,7 +73,14 @@ export function useVoting(
   proposal: Proposal | null,
   onProposalChanged?: (proposal: Proposal) => void,
 ) {
-  const { hydrated, session, connector, connect, connecting } = useVendorWallet();
+  const {
+    hydrated,
+    session,
+    connect,
+    connecting,
+    signMessage: signWalletMessage,
+    openSignPopup,
+  } = useVendorWallet();
   const queryClient = useQueryClient();
 
   const [signing, setSigning] = useState<VoteChoice | null>(null);
@@ -249,17 +256,15 @@ export function useVoting(
   const neededPower = passPower > tally.forPower ? passPower - tally.forPower : 0n;
 
   const castVote = async (choice: VoteChoice) => {
-    if (!dao || !proposal || !session || !connector) return;
+    if (!dao || !proposal || !session) return;
     setVoteError(null);
     setSigning(choice);
-    // Pre-open the popup synchronously in the click gesture (Safari-safe).
-    const popup = connector.openPopup('signMessage');
+    // Pre-open the passport popup synchronously in the click gesture
+    // (Safari-safe); null for extension/mobile wallets.
+    const popup = openSignPopup('signMessage');
     try {
       const message = buildVoteMessage(dao.id, proposal.id, proposal.title, choice);
-      const { signature, address, publicKey } = await connector.signMessage(
-        { message },
-        { popup: popup ?? undefined },
-      );
+      const { signature, address, publicKey } = await signWalletMessage(message, { popup });
       await getDaoStore().submitVote({
         proposalId: proposal.id,
         daoId: dao.id,

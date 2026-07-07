@@ -61,7 +61,15 @@ export default function NewProposalPage() {
   const params = useParams<{ dao: string }>();
   const dao = getDao(params?.dao);
   const { t, p, locale } = useI18n();
-  const { hydrated, session, connector, connect, connecting, network } = useVendorWallet();
+  const {
+    hydrated,
+    session,
+    connect,
+    connecting,
+    network,
+    signMessage: signWalletMessage,
+    openSignPopup,
+  } = useVendorWallet();
 
   const [title, setTitle] = useState('');
   // Optional Chinese version — when provided, zh readers see it instead of
@@ -200,7 +208,7 @@ export default function NewProposalPage() {
 
   const submit = async () => {
     setError(null);
-    if (!canSubmit || !session || !connector) return;
+    if (!canSubmit || !session) return;
     const body = bodySchema(locale).safeParse(bodyRef.current);
     if (!body.success) {
       setError(body.error.issues[0]?.message ?? t('err.bodyInvalid'));
@@ -208,7 +216,7 @@ export default function NewProposalPage() {
     }
     // Pre-open the signing popup synchronously in the click gesture
     // (Safari-safe) — the signature request comes after async espo work.
-    const popup = connector.openPopup('signMessage');
+    const popup = openSignPopup('signMessage');
     const closePopup = () => {
       if (popup && !popup.closed) popup.close();
     };
@@ -281,10 +289,9 @@ export default function NewProposalPage() {
         createdAt: new Date().toISOString(),
       };
       const id = computeProposalId(content);
-      const { signature, address } = await connector.signMessage(
-        { message: buildProposalSignMessage(id) },
-        { popup: popup ?? undefined },
-      );
+      const { signature, address } = await signWalletMessage(buildProposalSignMessage(id), {
+        popup,
+      });
       if (address !== content.proposer) {
         throw new Error('Signing account does not match the connected account.');
       }

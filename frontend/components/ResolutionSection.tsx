@@ -28,7 +28,7 @@ import type { Proposal } from '@/lib/dao/types';
 import { getDaoStore } from '@/lib/dao/store';
 import { useVendorWallet } from '@/context/VendorWalletContext';
 import { useI18n } from '@/hooks/useI18n';
-import { shortAddress, formatDate } from '@/lib/dao/format';
+import { shortAddress, formatDate, stripLeadingEmptyBlocks } from '@/lib/dao/format';
 import { explorerAddressUrl } from '@/lib/config';
 import MarkdownEditor from '@/components/MarkdownEditor';
 import Skeleton from '@/components/Skeleton';
@@ -61,7 +61,7 @@ export default function ResolutionSection({
 
   const submit = async () => {
     if (!session) return;
-    const markdown = draftRef.current.trim();
+    const markdown = stripLeadingEmptyBlocks(draftRef.current).trim();
     if (!markdown) {
       setError(t('resolution.empty'));
       return;
@@ -136,7 +136,7 @@ export default function ResolutionSection({
           <MarkdownEditor
             key={resolution.resolutionId}
             className="oa-markdown-view"
-            defaultValue={resolution.resolution}
+            defaultValue={stripLeadingEmptyBlocks(resolution.resolution)}
             readonly
           />
         </div>

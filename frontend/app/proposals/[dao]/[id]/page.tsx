@@ -22,6 +22,7 @@ import {
   formatTokenAmount,
   formatUsdCompact,
   shortAddress,
+  stripLeadingEmptyBlocks,
   totalTransferAmount,
   totalTransferBaseUnits,
 } from '@/lib/dao/format';
@@ -217,12 +218,12 @@ export default function ProposalDetailPage() {
           </div>
         </div>
 
-        {proposalBody(proposal, locale).trim() ? (
+        {stripLeadingEmptyBlocks(proposalBody(proposal, locale)).trim() ? (
           <div className="p-6 border-t border-[color:var(--oa-border)]">
             <MarkdownEditor
               key={`${proposal.id}:${locale}`}
               className="oa-markdown-view"
-              defaultValue={proposalBody(proposal, locale)}
+              defaultValue={stripLeadingEmptyBlocks(proposalBody(proposal, locale))}
               readonly
             />
           </div>

@@ -79,3 +79,14 @@ export function formatBlocksDuration(blocks: number): string {
   if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   return `${minutes}m`;
 }
+
+/**
+ * Milkdown serializes empty leading paragraphs as literal "<br />" lines
+ * in the markdown. Strip them (and leading blank lines) so displayed
+ * documents don't start with a phantom empty block. Used at render time
+ * (published bodies are immutable — their hash includes the noise) and
+ * at publish time so new content is clean.
+ */
+export function stripLeadingEmptyBlocks(markdown: string): string {
+  return markdown.replace(/^(?:\s*<br\s*\/?>)+\s*/i, '').replace(/^\n+/, '');
+}

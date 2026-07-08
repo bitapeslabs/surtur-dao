@@ -26,7 +26,8 @@ import { fetchDaoOverviewCached, fetchEspoHeight, fetchSupplyAndHolders } from '
 import { useEspoHeight } from '@/hooks/useEspoHeight';
 import { getDao } from '@/daos';
 import { bodySchema, validateProposalDraft } from '@/lib/dao/schemas';
-import { formatUsdCompact } from '@/lib/dao/format';
+import {
+  stripLeadingEmptyBlocks, formatUsdCompact } from '@/lib/dao/format';
 import { useI18n } from '@/hooks/useI18n';
 import { useProposerEligibility } from '@/hooks/useProposerEligibility';
 import InfoTip from '@/components/InfoTip';
@@ -277,8 +278,13 @@ export default function NewProposalPage() {
         daoId: dao.id,
         title: title.trim(),
         titleZh: withZh && titleZh.trim() ? titleZh.trim() : undefined,
-        body: body.data,
-        bodyZh: withZh && zhBodyRef.current.trim() ? zhBodyRef.current : undefined,
+        // Milkdown serializes empty leading paragraphs as "<br />" — strip
+        // before hashing so the published document starts clean.
+        body: stripLeadingEmptyBlocks(body.data),
+        bodyZh:
+          withZh && zhBodyRef.current.trim()
+            ? stripLeadingEmptyBlocks(zhBodyRef.current)
+            : undefined,
         transfers: transfers.map((tf) => ({
           address: tf.address.trim(),
           amount: tf.amount.trim(),

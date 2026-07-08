@@ -87,7 +87,10 @@ async function fetchNodeVotes(proposalId: string): Promise<VoteWire[]> {
         const json = await res.json().catch(() => null);
         if (json?.ok && Array.isArray(json.votes)) {
           for (const v of json.votes as VoteWire[]) {
-            if (!byAddress.has(v.address)) byAddress.set(v.address, v);
+            // Lexicographic consensus rule (same as the nodes): when nodes
+            // disagree on an address's vote, the smallest signature wins.
+            const current = byAddress.get(v.address);
+            if (!current || v.signature < current.signature) byAddress.set(v.address, v);
           }
         }
       } catch {

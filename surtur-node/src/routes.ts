@@ -157,7 +157,9 @@ router.post('/votes', async (req: Request, res: Response) => {
     }
     const vote = parsed.data as VoteWire;
 
-    if (await db.getVote(vote.proposalId, vote.address)) {
+    // Identical wire → pure duplicate: acknowledge and stop the gossip.
+    const existing = await db.getVote(vote.proposalId, vote.address);
+    if (existing && existing.signature === vote.signature) {
       res.json({ ok: true, known: true });
       return;
     }
@@ -181,6 +183,25 @@ router.post('/votes', async (req: Request, res: Response) => {
 
     if (!(await voterHoldsToken(dao, vote.address))) {
       res.status(403).json({ ok: false, error: 'voter holds no voting token' });
+      return;
+    }
+
+    // Lexicographic consensus rule: an address racing two DIFFERENT valid
+    // votes to different nodes must not leave the network split on which
+    // one counts. Every node keeps the vote with the lexicographically
+    // SMALLEST signature — deterministic regardless of arrival order, so
+    // all nodes converge. Replacements re-relay the winner; the signature
+    // strictly decreases on every replace, so gossip terminates (identical
+    // wires hit the known:true short-circuit above).
+    if (existing) {
+      if (vote.signature < existing.signature) {
+        await db.replaceVote(vote);
+        res.json({ ok: true });
+        void relayToPeers('/votes', vote);
+      } else {
+        // Ours wins — acknowledge; the sender converges via our relay.
+        res.json({ ok: true, known: true });
+      }
       return;
     }
 

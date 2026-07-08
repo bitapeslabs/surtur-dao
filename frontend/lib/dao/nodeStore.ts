@@ -361,7 +361,11 @@ export class NodeDaoStore implements DaoStore {
     const merged = new Map<string, VoteWire>();
     for (const votes of perNode) {
       for (const vote of votes) {
-        if (vote.proposalId !== proposalId || merged.has(vote.address)) continue;
+        if (vote.proposalId !== proposalId) continue;
+        // Same lexicographic consensus rule as the nodes: when nodes
+        // disagree on an address's vote, the smallest signature wins.
+        const current = merged.get(vote.address);
+        if (current && current.signature <= vote.signature) continue;
         if (!verifyVoteWire(vote, proposal.title).ok) continue;
         merged.set(vote.address, vote);
       }

@@ -181,9 +181,23 @@ export async function listVotes(proposalId: string): Promise<VoteWire[]> {
 }
 
 export async function insertVote(v: VoteWire): Promise<void> {
-  // Votes are final — first accepted signature per (proposal, address) wins.
+  // Votes are final — first accepted signature per (proposal, address) wins,
+  // unless the lexicographic consensus rule replaces it (see routes.ts).
   db.prepare(
     `INSERT OR IGNORE INTO votes
+      (proposal_id, address, dao_id, choice, signature, message, voted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(v.proposalId, v.address, v.daoId, v.choice, v.signature, v.message, v.votedAt);
+}
+
+/**
+ * Replace an existing (proposal, address) vote with the consensus winner.
+ * Only called after full validation AND the lexicographic comparison in
+ * the /votes route decided the incoming vote wins.
+ */
+export async function replaceVote(v: VoteWire): Promise<void> {
+  db.prepare(
+    `INSERT OR REPLACE INTO votes
       (proposal_id, address, dao_id, choice, signature, message, voted_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(v.proposalId, v.address, v.daoId, v.choice, v.signature, v.message, v.votedAt);

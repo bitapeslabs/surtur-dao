@@ -220,14 +220,17 @@ export class NodeDaoStore implements DaoStore {
     for (const row of intact) {
       const dao = this.getDao(row.proposal.daoId);
       if (!dao) continue;
-      const cached = thresholdVerdictCache.get(row.proposal.id);
+      // The cache key carries the threshold pctg in force at the start
+      // block: verdicts are immutable for a GIVEN threshold, but a
+      // schedule change (incl. retroactive ones) must re-judge.
+      const pctg = resolveThreshold(dao.proposalThreshold, row.proposal.startBlock);
+      const cached = thresholdVerdictCache.get(`${row.proposal.id}:${pctg}`);
       if (cached !== undefined) {
         if (cached) passThrough.push(row);
         continue;
       }
-      // The fork entry in force at the proposal's start block.
-      if (resolveThreshold(dao.proposalThreshold, row.proposal.startBlock) <= 0) {
-        thresholdVerdictCache.set(row.proposal.id, true);
+      if (pctg <= 0) {
+        thresholdVerdictCache.set(`${row.proposal.id}:${pctg}`, true);
         passThrough.push(row);
       } else {
         needCheck.push(row);
@@ -295,7 +298,7 @@ export class NodeDaoStore implements DaoStore {
           if (supply <= 0n) return;
           const pctg = resolveThreshold(dao.proposalThreshold, row.proposal.startBlock);
           const meets = held >= thresholdPower(supply, pctg);
-          thresholdVerdictCache.set(row.proposal.id, meets);
+          thresholdVerdictCache.set(`${row.proposal.id}:${pctg}`, meets);
           if (meets) valid.push(row);
         });
       } catch {

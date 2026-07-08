@@ -80,12 +80,10 @@ export const DAOS: DaoDefinition[] = [
     votingToken: { alkaneId: '2:77623', symbol: 'FIRE' },
     // Test resolver — the dev wallet used while testing the flow.
     resolverSigner: 'bc1psn0925c2p5mjnvkg0xkntpd26wtcyktmwt3shuw7ue04yed5sjfs7xwmj4',
-    // 0% for history (proposals created while testing without a
-    // threshold), then a deliberately tiny test threshold — raise it via a
-    // NEW fork entry (e.g. { height: <future>, pctg: 0.5 }) for production.
-    proposalThreshold: [
-      { height: 0, pctg: 0.01 },
-    ],
+    // 0.5% from genesis — DELIBERATELY retroactive: proposals whose
+    // proposer held less at their start block are invalid everywhere
+    // (the FE prunes them and nodes reject new ones).
+    proposalThreshold: [{ height: 0, pctg: 0.5 }],
     // 40% before the test fork, 0.05% after — deliberately tiny so the
     // passed-proposal → resolution flow is testable with a small wallet.
     votePassThreshold: [

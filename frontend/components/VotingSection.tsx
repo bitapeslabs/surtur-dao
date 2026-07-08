@@ -511,21 +511,27 @@ export default function VotingSection({ voting }: { voting: VotingState }) {
         {/* Fixed label slots so labels can never collide, regardless of
             segment widths: For pinned to the bar's left edge, Abstain dead
             center, Against pinned to the right edge. Zero-balance sections
-            leave their slot empty. */}
-        <div className="grid grid-cols-3 items-center text-xs text-[color:var(--oa-ink-secondary)]">
+            leave their slot empty. On narrow (mobile) viewports the row
+            would overlap anyway, so the labels stack as a left-aligned
+            column instead. */}
+        <div className="flex flex-col gap-1 sm:grid sm:grid-cols-3 sm:items-center text-xs text-[color:var(--oa-ink-secondary)]">
           {snapshotLoading ? (
             <>
-              <Skeleton className="h-3 w-24 justify-self-start" />
-              <Skeleton className="h-3 w-24 justify-self-center" />
-              <Skeleton className="h-3 w-24 justify-self-end" />
+              <Skeleton className="h-3 w-24 sm:justify-self-start" />
+              <Skeleton className="h-3 w-24 sm:justify-self-center" />
+              <Skeleton className="h-3 w-24 sm:justify-self-end" />
             </>
           ) : tally.total > 0n ? (
             segments.map((s, i) => (
               <div
                 key={s.choice}
-                className={
-                  i === 0 ? 'justify-self-start' : i === 1 ? 'justify-self-center' : 'justify-self-end'
-                }
+                className={`${s.power > 0n ? '' : 'hidden sm:block'} ${
+                  i === 0
+                    ? 'sm:justify-self-start'
+                    : i === 1
+                      ? 'sm:justify-self-center'
+                      : 'sm:justify-self-end'
+                }`}
               >
                 {s.power > 0n && (
                   <span className="inline-flex items-center gap-1 whitespace-nowrap">
@@ -541,7 +547,7 @@ export default function VotingSection({ voting }: { voting: VotingState }) {
               </div>
             ))
           ) : (
-            <span className="col-span-3 text-[color:var(--oa-ink-tertiary)]">
+            <span className="sm:col-span-3 text-[color:var(--oa-ink-tertiary)]">
               {t('votes.supplyUnavailable')}
             </span>
           )}

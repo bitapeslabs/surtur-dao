@@ -40,6 +40,11 @@ export interface DaoStore {
    * server-side — a client writing its own verdict is not trustworthy.
    */
   updateProposalStatus(id: string, status: Proposal['status']): Promise<Proposal | null>;
+  /**
+   * proposalId → total votes for every proposal of a DAO (one aggregate
+   * call). Node-backed stores keep the HIGHEST count any node reports.
+   */
+  getVoteCounts(daoId: string): Promise<Record<string, number>>;
   /** The proposal's resolution, if the DAO's resolver has provided one. */
   getResolution(proposalId: string): Promise<ResolutionWire | null>;
   /**
@@ -135,6 +140,14 @@ class LocalStorageDaoStore implements DaoStore {
     );
     localStorage.setItem(VOTES_KEY, JSON.stringify([...rest, vote]));
     return vote;
+  }
+
+  async getVoteCounts(daoId: string): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const vote of readArray<Vote>(VOTES_KEY)) {
+      if (vote.daoId === daoId) counts[vote.proposalId] = (counts[vote.proposalId] ?? 0) + 1;
+    }
+    return counts;
   }
 
   async getResolution(proposalId: string): Promise<ResolutionWire | null> {

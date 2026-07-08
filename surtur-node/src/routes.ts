@@ -192,6 +192,27 @@ router.post('/votes', async (req: Request, res: Response) => {
   }
 });
 
+// ---- vote counts ------------------------------------------------------
+
+/**
+ * GET /votes/counts?dao=<daoId> → { ok, counts: { [proposalId]: n } }.
+ * One aggregate for the whole DAO — the proposals list shows per-row
+ * totals without fetching every proposal's full vote set. Clients fan
+ * out to all whitelisted nodes and keep the HIGHEST count per proposal.
+ */
+router.get('/votes/counts', async (req: Request, res: Response) => {
+  try {
+    const daoId = typeof req.query.dao === 'string' ? req.query.dao : '';
+    if (!daoId) {
+      res.status(400).json({ ok: false, error: 'dao query param required' });
+      return;
+    }
+    res.json({ ok: true, counts: await db.getVoteCountsByDao(daoId) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 // ---- resolutions ------------------------------------------------------
 
 router.get('/resolutions', async (req: Request, res: Response) => {

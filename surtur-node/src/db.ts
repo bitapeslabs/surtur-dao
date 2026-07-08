@@ -189,6 +189,16 @@ export async function insertVote(v: VoteWire): Promise<void> {
   ).run(v.proposalId, v.address, v.daoId, v.choice, v.signature, v.message, v.votedAt);
 }
 
+/** proposalId → number of votes, for every proposal of a DAO. */
+export async function getVoteCountsByDao(daoId: string): Promise<Record<string, number>> {
+  const rows = db
+    .prepare('SELECT proposal_id, COUNT(*) AS n FROM votes WHERE dao_id = ? GROUP BY proposal_id')
+    .all(daoId) as Array<{ proposal_id: string; n: number }>;
+  const counts: Record<string, number> = {};
+  for (const row of rows) counts[row.proposal_id] = Number(row.n);
+  return counts;
+}
+
 // ---- resolutions ------------------------------------------------------
 
 interface ResolutionRow {

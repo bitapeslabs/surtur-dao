@@ -33,7 +33,6 @@ import {
   formatTokenCompact,
   formatUsdCompact,
   shortAddress,
-  totalTransferAmount,
 } from '@/lib/dao/format';
 import ProposalStatusPill from '@/components/ProposalStatusPill';
 import { daoDescription, proposalTitle } from '@/i18n';
@@ -70,10 +69,13 @@ function ProposalRow({
   dao,
   proposal,
   height,
+  voteCount,
 }: {
   dao: DaoDefinition;
   proposal: Proposal;
   height: number | null;
+  /** Highest total any node reports; null while loading. */
+  voteCount: number | null;
 }) {
   const { t, p, locale } = useI18n();
   const open = proposal.status === 'open';
@@ -124,9 +126,14 @@ function ProposalRow({
       </div>
       <div className="flex items-center gap-3 shrink-0">
         <div className="text-right">
-          <div className="text-sm font-medium tabular-nums flex items-center justify-end gap-1.5">
-            {totalTransferAmount(proposal).toLocaleString(undefined, { maximumFractionDigits: 8 })}
-            <TokenIcon id={dao.treasuryToken.alkaneId} symbol={dao.treasuryToken.symbol} size="xs" />
+          <div className="text-sm font-medium tabular-nums">
+            {voteCount === null ? (
+              <Skeleton className="h-4 w-14 inline-block" />
+            ) : voteCount === 1 ? (
+              t('dao.voteCountOne')
+            ) : (
+              t('dao.voteCount', { n: voteCount.toLocaleString() })
+            )}
           </div>
           {open && (
             <div className="mt-0.5 text-xs text-[color:var(--oa-ink-secondary)] tabular-nums whitespace-nowrap">
@@ -182,6 +189,7 @@ export default function DaoProposalsPage() {
     if (height === null || !dao) return;
     if (lastHeightRef.current !== null && height !== lastHeightRef.current) {
       void queryClient.invalidateQueries({ queryKey: ['nodes', 'proposals', dao.id] });
+      void queryClient.invalidateQueries({ queryKey: ['nodes', 'vote-counts', dao.id] });
       void queryClient.invalidateQueries({ queryKey: ['orchestrator', 'overview', dao.id] });
     }
     lastHeightRef.current = height;
@@ -195,6 +203,17 @@ export default function DaoProposalsPage() {
     placeholderData: (prev) => prev,
   });
   const proposals = proposalsQuery.data ?? null;
+
+  // Per-proposal vote totals (highest any node reports), refreshed with
+  // the same block-change invalidation as the list itself.
+  const voteCountsQuery = useQuery({
+    queryKey: ['nodes', 'vote-counts', dao?.id],
+    queryFn: () => getDaoStore().getVoteCounts(dao!.id),
+    enabled: !!dao,
+    staleTime: Infinity,
+    placeholderData: (prev) => prev,
+  });
+  const voteCounts = voteCountsQuery.data ?? null;
   const overviewQuery = useQuery({
     queryKey: ['orchestrator', 'overview', dao?.id],
     queryFn: () => fetchDaoOverviewCached(dao!),
@@ -319,7 +338,13 @@ export default function DaoProposalsPage() {
 
           <div className="divide-y divide-[color:var(--oa-border)]">
             {activePageItems?.map((p) => (
-              <ProposalRow key={p.id} dao={dao} proposal={p} height={height} />
+              <ProposalRow
+                key={p.id}
+                dao={dao}
+                proposal={p}
+                height={height}
+                voteCount={voteCounts === null ? null : (voteCounts[p.id] ?? 0)}
+              />
             ))}
 
             {activePageItems !== null && activePageItems.length === 0 && (
@@ -386,7 +411,13 @@ export default function DaoProposalsPage() {
           <section className="rounded-2xl overflow-hidden bg-[color:var(--oa-bg-raised)] -mt-3">
             <div className="divide-y divide-[color:var(--oa-border)]">
               {past.map((p) => (
-                <ProposalRow key={p.id} dao={dao} proposal={p} height={height} />
+                <ProposalRow
+                key={p.id}
+                dao={dao}
+                proposal={p}
+                height={height}
+                voteCount={voteCounts === null ? null : (voteCounts[p.id] ?? 0)}
+              />
               ))}
             </div>
           </section>

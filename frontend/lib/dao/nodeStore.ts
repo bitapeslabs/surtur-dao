@@ -393,6 +393,24 @@ export class NodeDaoStore implements DaoStore {
   }
 
   /**
+   * Vote totals per proposal. Nodes may disagree (gossip lag) — keep the
+   * HIGHEST count any node reports for each proposal.
+   */
+  async getVoteCounts(daoId: string): Promise<Record<string, number>> {
+    const perNode = await this.fanOutGet<Record<string, number>>(
+      `/votes/counts?dao=${encodeURIComponent(daoId)}`,
+      (json) => (json?.ok && json.counts && typeof json.counts === 'object' ? json.counts : null),
+    );
+    const merged: Record<string, number> = {};
+    for (const counts of perNode) {
+      for (const [id, n] of Object.entries(counts)) {
+        if (typeof n === 'number' && n > (merged[id] ?? 0)) merged[id] = n;
+      }
+    }
+    return merged;
+  }
+
+  /**
    * First resolution any whitelisted node knows about. The frontend
    * deliberately does NOT re-check the signer against the CURRENT
    * resolverSigner — nodes enforced that at write time, and the resolver

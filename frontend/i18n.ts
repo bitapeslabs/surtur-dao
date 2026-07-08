@@ -55,6 +55,8 @@ export const MESSAGES = {
   'dao.colProposal': { en: 'Proposal', zh: '提案' },
   'dao.colTransfers': { en: 'Transfers', zh: '转账' },
   'dao.noProposals': { en: 'No proposals yet', zh: '暂无提案' },
+  'dao.voteCount': { en: '{n} votes', zh: '{n} 票' },
+  'dao.voteCountOne': { en: '1 vote', zh: '1 票' },
   'dao.createFirst': {
     en: "Create the first proposal to put the DAO's {symbol} reserves to work.",
     zh: '创建第一个提案，动用 DAO 的 {symbol} 储备。',

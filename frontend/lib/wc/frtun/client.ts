@@ -62,6 +62,34 @@ export interface FrtunPairingResult {
   cancel: () => void;
 }
 
+// ── v2 frame wrapper ────────────────────────────────────────────────
+// Newer phone builds wrap every data frame as [tag 0x01][u32 BE length]
+// [payload] (observed live: the pairing pub arrives as 0x01 00 00 00 2b
+// + 43-byte b64url text). Detect it on the first frame and mirror it
+// both ways for the rest of the session.
+
+const FRAME_TAG = 0x01;
+
+function unwrapFrame(frame: Uint8Array): Uint8Array | null {
+  if (frame.length < 5 || frame[0] !== FRAME_TAG) return null;
+  const len =
+    (frame[1] << 24) | (frame[2] << 16) | (frame[3] << 8) | frame[4];
+  if (len >>> 0 !== frame.length - 5) return null;
+  return frame.subarray(5);
+}
+
+function wrapFrame(payload: Uint8Array): Uint8Array {
+  const out = new Uint8Array(5 + payload.length);
+  out[0] = FRAME_TAG;
+  const len = payload.length;
+  out[1] = (len >>> 24) & 0xff;
+  out[2] = (len >>> 16) & 0xff;
+  out[3] = (len >>> 8) & 0xff;
+  out[4] = len & 0xff;
+  out.set(payload, 5);
+  return out;
+}
+
 /** A live frtun pairing session. Drives encrypted requests over the
  *  open /v1/pair binary stream and correlates responses by request_id. */
 export class FrtunSession {
@@ -70,15 +98,23 @@ export class FrtunSession {
   readonly addresses: string[] = [];
   private readonly symKey: Uint8Array;
   private readonly stream: FrtunStream;
+  /** Phone speaks the [tag][len] v2 wrapper — mirror it on sends. */
+  private readonly framed: boolean;
   /** Serialize requests: the bridge is a single request/response socket
    *  with no multiplexing, so two in-flight requests would race on the
    *  shared stream. Each request waits for the previous to settle. */
   private tail: Promise<unknown> = Promise.resolve();
 
-  constructor(opts: { origin: string; symKey: Uint8Array; stream: FrtunStream }) {
+  constructor(opts: {
+    origin: string;
+    symKey: Uint8Array;
+    stream: FrtunStream;
+    framed?: boolean;
+  }) {
     this.origin = opts.origin;
     this.symKey = opts.symKey;
     this.stream = opts.stream;
+    this.framed = opts.framed ?? false;
   }
 
   /** Send an encrypted plaintext request and await the decrypted
@@ -94,7 +130,8 @@ export class FrtunSession {
         ciphertextB64: bytesToB64Url(ciphertext),
         nonceB64: bytesToB64Url(nonce),
       };
-      this.stream.send(new TextEncoder().encode(JSON.stringify(env)));
+      const outBytes = new TextEncoder().encode(JSON.stringify(env));
+      this.stream.send(this.framed ? wrapFrame(outBytes) : outBytes);
 
       // Read frames until one decrypts to a response for THIS request_id.
       // Drains any stale/unsolicited envelope rather than mis-correlating
@@ -103,7 +140,8 @@ export class FrtunSession {
       for (;;) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) throw new Error('wc:internal frtun request timed out');
-        const respBytes = await this.stream.next(remaining);
+        const rawBytes = await this.stream.next(remaining);
+        const respBytes = unwrapFrame(rawBytes) ?? rawBytes;
         let resp: Plaintext;
         try {
           const respEnv = JSON.parse(new TextDecoder().decode(respBytes)) as FrtunEnvelope;
@@ -165,18 +203,24 @@ export class FrtunSession {
 }
 
 /** Pull the phone's 32-byte X25519 pub out of its first frame,
- *  whichever wire form the phone build uses (see call site). */
-function extractMobilePub(frame: Uint8Array): Uint8Array {
-  if (frame.length === 32) return frame;
-  const text = new TextDecoder().decode(frame).trim();
+ *  whichever wire form the phone build uses (see call site). Also
+ *  reports whether the frame used the v2 [tag][len] wrapper so the
+ *  session mirrors it. */
+function extractMobilePub(frame: Uint8Array): { pub: Uint8Array; framed: boolean } {
+  const unwrapped = unwrapFrame(frame);
+  const payload = unwrapped ?? frame;
+  const framed = unwrapped !== null;
+
+  if (payload.length === 32) return { pub: payload, framed };
+  const text = new TextDecoder().decode(payload).trim();
   try {
-    return pubFromB64Url(text);
+    return { pub: pubFromB64Url(text), framed };
   } catch {
-    /* not the bare legacy form — scan below */
+    /* not the bare b64url form — scan below */
   }
   for (const run of text.match(/[A-Za-z0-9_-]{43}/g) ?? []) {
     try {
-      return pubFromB64Url(run);
+      return { pub: pubFromB64Url(run), framed };
     } catch {
       /* run didn't decode to 32 bytes — keep scanning */
     }
@@ -233,7 +277,7 @@ export function connect(opts: FrtunConnectOptions = {}): FrtunPairingResult {
     // Anything else surfaces the frame content in the error instead of a
     // cryptic base64 "Unknown letter".
     const firstFrame = await stream.next(5 * 60_000);
-    const mobilePub = extractMobilePub(firstFrame);
+    const { pub: mobilePub, framed } = extractMobilePub(firstFrame);
 
     // symKey = HKDF(ECDH(dappPriv, mobilePub), salt="subfrost-wc-v1",
     //               info="<cliPeerName>:<code>")  — the only crypto
@@ -241,7 +285,7 @@ export function connect(opts: FrtunConnectOptions = {}): FrtunPairingResult {
     // the phone's HKDF(ECDH(mobilePriv, dappPub), same info).
     const symKey = ecdhDerive(kp.priv, mobilePub, `${self.peerName}:${code}`);
 
-    return new FrtunSession({ origin, symKey, stream });
+    return new FrtunSession({ origin, symKey, stream, framed });
   })();
 
   return {

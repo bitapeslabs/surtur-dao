@@ -164,6 +164,29 @@ export class FrtunSession {
   }
 }
 
+/** Pull the phone's 32-byte X25519 pub out of its first frame,
+ *  whichever wire form the phone build uses (see call site). */
+function extractMobilePub(frame: Uint8Array): Uint8Array {
+  if (frame.length === 32) return frame;
+  const text = new TextDecoder().decode(frame).trim();
+  try {
+    return pubFromB64Url(text);
+  } catch {
+    /* not the bare legacy form — scan below */
+  }
+  for (const run of text.match(/[A-Za-z0-9_-]{43}/g) ?? []) {
+    try {
+      return pubFromB64Url(run);
+    } catch {
+      /* run didn't decode to 32 bytes — keep scanning */
+    }
+  }
+  throw new FrtunPairError(
+    'bad_frame',
+    `unexpected first frame from phone (${frame.length} bytes): "${text.slice(0, 100)}"`,
+  );
+}
+
 /** Open a frtun pairing handshake. Returns the QR URI immediately and a
  *  promise that resolves to a connected session once the phone scans +
  *  dials in. Drop-in shape compatible with lib/wc/client.ts:connect. */
@@ -200,26 +223,17 @@ export function connect(opts: FrtunConnectOptions = {}): FrtunPairingResult {
   const accepted = (async (): Promise<FrtunSession> => {
     stream = await listen({ bridgeUrl, selfPeer: self.peerName, signal: abort.signal });
 
-    // The phone's FIRST binary frame is its X25519 pub — either 43-char
-    // base64url utf-8 (pair_cli.rs:188-190) or, on newer phone builds,
-    // the raw 32 bytes. Anything else surfaces the frame content in the
-    // error instead of a cryptic base64 "Unknown letter" (a raw-byte
-    // frame decoded as text contains 0x20 = " ").
+    // The phone's FIRST binary frame carries its X25519 pub, whose wire
+    // form varies by phone build:
+    //   - 43-char base64url utf-8 (pair_cli.rs:188-190, the original),
+    //   - raw 32 bytes,
+    //   - wrapped/prefixed text (observed live: "+<43-char b64url>" plus
+    //     trailing whitespace) — scan for any 43-char base64url run that
+    //     decodes to exactly 32 bytes.
+    // Anything else surfaces the frame content in the error instead of a
+    // cryptic base64 "Unknown letter".
     const firstFrame = await stream.next(5 * 60_000);
-    let mobilePub: Uint8Array;
-    if (firstFrame.length === 32) {
-      mobilePub = firstFrame;
-    } else {
-      const text = new TextDecoder().decode(firstFrame).trim();
-      try {
-        mobilePub = pubFromB64Url(text);
-      } catch {
-        throw new FrtunPairError(
-          'bad_frame',
-          `unexpected first frame from phone (${firstFrame.length} bytes): "${text.slice(0, 100)}"`,
-        );
-      }
-    }
+    const mobilePub = extractMobilePub(firstFrame);
 
     // symKey = HKDF(ECDH(dappPriv, mobilePub), salt="subfrost-wc-v1",
     //               info="<cliPeerName>:<code>")  — the only crypto

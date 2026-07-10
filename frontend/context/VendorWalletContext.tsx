@@ -39,6 +39,7 @@ import {
 } from 'subfrost-connect';
 import { normalizeNetwork, SUPPORTED_NETWORKS, type VendorNetwork } from '@/lib/config';
 import { SUBFROST_ORIGIN } from '@/config';
+import { networkForAddress, verifyMessageSimple } from '@surtur/shared';
 import {
   connectExtension,
   getInstalledExtensions,
@@ -168,6 +169,36 @@ interface VendorWalletValue {
     params: SignPsbtParams,
     opts?: { popup?: Window | null },
   ) => Promise<string>;
+}
+
+/**
+ * Pre-flight the wallet's signature with the SAME verifier the surtur
+ * nodes run, so a bad signature fails HERE with diagnostics instead of
+ * as an opaque node 400. Logs the full triple for debugging (all of it
+ * is public data — it would have been POSTed anyway).
+ */
+function assertBip322Valid(
+  message: string,
+  address: string,
+  signature: string,
+  walletName: string,
+): void {
+  const network = networkForAddress(address);
+  const valid =
+    !!network && verifyMessageSimple({ message, address, signature, network });
+  if (!valid) {
+    console.error('[wallet] BIP-322 verification failed', {
+      wallet: walletName,
+      address,
+      message,
+      signature,
+    });
+    throw new Error(
+      `${walletName} returned a signature that does not verify as BIP-322 simple ` +
+        `against ${address}. If you switched accounts or address type in the wallet, ` +
+        `reconnect and try again. (Details logged to the browser console.)`,
+    );
+  }
 }
 
 const VendorWalletContext = createContext<VendorWalletValue | null>(null);
@@ -326,6 +357,7 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
             session.account.address,
             message,
           );
+          assertBip322Valid(message, session.account.address, signature, session.walletName);
           return {
             signature,
             address: session.account.address,
@@ -336,6 +368,7 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
           const adapter = mobileAdapterRef.current;
           if (!adapter) throw new Error('SUBFROST Mobile session lost — reconnect.');
           const signature = await adapter.signMessage(message, session.account.address);
+          assertBip322Valid(message, session.account.address, signature, session.walletName);
           return { signature, address: session.account.address };
         }
       }

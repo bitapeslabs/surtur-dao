@@ -200,11 +200,26 @@ export function connect(opts: FrtunConnectOptions = {}): FrtunPairingResult {
   const accepted = (async (): Promise<FrtunSession> => {
     stream = await listen({ bridgeUrl, selfPeer: self.peerName, signal: abort.signal });
 
-    // The phone's FIRST binary frame is its X25519 pub as 43-char
-    // base64url utf-8 (pair_cli.rs:188-190). NOT an envelope.
+    // The phone's FIRST binary frame is its X25519 pub — either 43-char
+    // base64url utf-8 (pair_cli.rs:188-190) or, on newer phone builds,
+    // the raw 32 bytes. Anything else surfaces the frame content in the
+    // error instead of a cryptic base64 "Unknown letter" (a raw-byte
+    // frame decoded as text contains 0x20 = " ").
     const firstFrame = await stream.next(5 * 60_000);
-    const mobilePubB64 = new TextDecoder().decode(firstFrame).trim();
-    const mobilePub = pubFromB64Url(mobilePubB64);
+    let mobilePub: Uint8Array;
+    if (firstFrame.length === 32) {
+      mobilePub = firstFrame;
+    } else {
+      const text = new TextDecoder().decode(firstFrame).trim();
+      try {
+        mobilePub = pubFromB64Url(text);
+      } catch {
+        throw new FrtunPairError(
+          'bad_frame',
+          `unexpected first frame from phone (${firstFrame.length} bytes): "${text.slice(0, 100)}"`,
+        );
+      }
+    }
 
     // symKey = HKDF(ECDH(dappPriv, mobilePub), salt="subfrost-wc-v1",
     //               info="<cliPeerName>:<code>")  — the only crypto

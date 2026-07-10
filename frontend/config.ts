@@ -10,4 +10,4 @@
  * Origin of the SUBFROST app the connect/sign popups open against.
  * Must be a bare origin (scheme + host, no path or trailing slash).
  */
-export const SUBFROST_ORIGIN = 'https://staging-app.subfrost.io';
+export const SUBFROST_ORIGIN = 'https://app.subfrost.io';

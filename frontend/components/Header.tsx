@@ -210,7 +210,7 @@ export default function Header() {
                       className="oa-input"
                       value={subfrostOrigin}
                       onChange={(e) => setSubfrostOrigin(e.target.value)}
-                      placeholder="https://staging-app.subfrost.io"
+                      placeholder="https://app.subfrost.io"
                     />
                     <p className="mt-2 text-xs text-[color:var(--oa-ink-tertiary)]">
                       {t('header.originHint')}

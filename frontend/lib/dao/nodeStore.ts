@@ -18,6 +18,10 @@ import {
   thresholdPower,
   verifyProposalBundle,
   verifyVoteWire,
+  verifyDelegatorBundle,
+  verifyDelegationAction,
+  type DelegationActionWire,
+  type DelegatorBundle,
   type ProposalBundle,
   type ProposalWire,
   type ResolutionWire,
@@ -295,7 +299,12 @@ export class NodeDaoStore implements DaoStore {
           const held = BigInt(
             String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
           );
-          if (supply <= 0n) return;
+          if (supply <= 0n) {
+            // Espo's versioned view isn't materialized for that block yet
+            // (exact-tip race) — trust the node for now, judge next fetch.
+            valid.push(row);
+            return;
+          }
           const pctg = resolveThreshold(dao.proposalThreshold, row.proposal.startBlock);
           const meets = held >= thresholdPower(supply, pctg);
           thresholdVerdictCache.set(`${row.proposal.id}:${pctg}`, meets);
@@ -415,6 +424,191 @@ export class NodeDaoStore implements DaoStore {
       }
     }
     return merged;
+  }
+
+  // ---- delegators -------------------------------------------------------
+
+  /**
+   * Union of every node's delegators for a DAO. List rows are
+   * metadata-only (no description → the id can't be recomputed), so
+   * full integrity verification happens in getDelegator; the creation
+   * threshold is re-verified here against espo (immutable per id —
+   * cached like proposal threshold verdicts). Optimistic: unseen
+   * delegators show while espo answers in the background.
+   */
+  async listDelegators(daoId: string): Promise<DelegatorBundle[]> {
+    await fakeLoadDelay();
+    const perNode = await this.fanOutGet<DelegatorBundle[]>(
+      `/delegators?dao=${encodeURIComponent(daoId)}`,
+      (json) => (json?.ok && Array.isArray(json.delegators) ? json.delegators : null),
+    );
+    const merged = new Map<string, DelegatorBundle>();
+    for (const bundles of perNode) {
+      for (const bundle of bundles) {
+        if (bundle.delegator.daoId !== daoId) continue;
+        if (!merged.has(bundle.delegator.id)) merged.set(bundle.delegator.id, bundle);
+      }
+    }
+    return this.filterValidDelegators([...merged.values()], { optimistic: true });
+  }
+
+  async getDelegator(id: string): Promise<DelegatorBundle | null> {
+    await fakeLoadDelay();
+    const rows = await this.fanOutGet<DelegatorBundle>(
+      `/delegators/${encodeURIComponent(id)}`,
+      (json) => (json?.ok && json.delegator ? (json as DelegatorBundle) : null),
+    );
+    const bundle = rows.find((b) => b.delegator.id === id);
+    if (!bundle) return null;
+    // Full bundle → verify id integrity + signature client-side.
+    if (!verifyDelegatorBundle(bundle).ok) return null;
+    const valid = await this.filterValidDelegators([bundle], { optimistic: false });
+    return valid.length ? bundle : null;
+  }
+
+  async publishDelegator(bundle: DelegatorBundle): Promise<void> {
+    await this.fanOutPost('/delegators', bundle);
+  }
+
+  /**
+   * Creation-threshold re-verification (trust-but-verify vs nodes):
+   * creator held delegatorThreshold at createdAtBlock. Pinned at that
+   * block → immutable per (id, pctg) — cached in localStorage alongside
+   * the proposal threshold verdicts.
+   */
+  private async filterValidDelegators(
+    bundles: DelegatorBundle[],
+    opts: { optimistic: boolean },
+  ): Promise<DelegatorBundle[]> {
+    const passThrough: DelegatorBundle[] = [];
+    const needCheck: DelegatorBundle[] = [];
+    for (const bundle of bundles) {
+      const dao = this.getDao(bundle.delegator.daoId);
+      if (!dao) continue;
+      const pctg = resolveThreshold(dao.delegatorThreshold ?? [], bundle.delegator.createdAtBlock);
+      const cached = thresholdVerdictCache.get(`dlg:${bundle.delegator.id}:${pctg}`);
+      if (cached !== undefined) {
+        if (cached) passThrough.push(bundle);
+        continue;
+      }
+      if (pctg <= 0) {
+        thresholdVerdictCache.set(`dlg:${bundle.delegator.id}:${pctg}`, true);
+        passThrough.push(bundle);
+      } else {
+        needCheck.push(bundle);
+      }
+    }
+    if (needCheck.length === 0) return passThrough;
+    if (opts.optimistic) {
+      void this.checkDelegatorThresholds(needCheck);
+      return [...passThrough, ...needCheck];
+    }
+    const checked = await this.checkDelegatorThresholds(needCheck);
+    return [...passThrough, ...checked];
+  }
+
+  private async checkDelegatorThresholds(bundles: DelegatorBundle[]): Promise<DelegatorBundle[]> {
+    const valid: DelegatorBundle[] = [];
+    const byNetwork = new Map<string, DelegatorBundle[]>();
+    for (const bundle of bundles) {
+      const dao = this.getDao(bundle.delegator.daoId)!;
+      const list = byNetwork.get(dao.espoNetwork) ?? [];
+      list.push(bundle);
+      byNetwork.set(dao.espoNetwork, list);
+    }
+    for (const [network, list] of byNetwork) {
+      try {
+        const requests = list.flatMap((bundle, i) => {
+          const dao = this.getDao(bundle.delegator.daoId)!;
+          return [
+            {
+              jsonrpc: '2.0',
+              id: `s-${i}`,
+              method: 'essentials.get_circulating_supply',
+              params: {
+                alkane: dao.votingToken.alkaneId,
+                height: bundle.delegator.createdAtBlock,
+              },
+            },
+            {
+              jsonrpc: '2.0',
+              id: `b-${i}`,
+              method: 'essentials.get_address_balances',
+              params: {
+                address: bundle.delegator.delegator,
+                height: bundle.delegator.createdAtBlock,
+              },
+            },
+          ];
+        });
+        const res = await fetch(getEspoUrl(network), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requests),
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (!res.ok) throw new Error(`espo ${res.status}`);
+        const json = await res.json();
+        const byId = new Map(
+          (Array.isArray(json) ? json : [json]).map((e: any) => [String(e?.id), e?.result]),
+        );
+        list.forEach((bundle, i) => {
+          const dao = this.getDao(bundle.delegator.daoId)!;
+          const supply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
+          const held = BigInt(
+            String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
+          );
+          if (supply <= 0n) {
+            // Versioned view not materialized yet (exact-tip race) —
+            // trust the node for now, judge on a later fetch.
+            valid.push(bundle);
+            return;
+          }
+          const pctg = resolveThreshold(
+            dao.delegatorThreshold ?? [],
+            bundle.delegator.createdAtBlock,
+          );
+          const meets = held >= thresholdPower(supply, pctg);
+          thresholdVerdictCache.set(`dlg:${bundle.delegator.id}:${pctg}`, meets);
+          if (meets) valid.push(bundle);
+        });
+      } catch {
+        // Espo unavailable — fall back to trusting the nodes' own checks.
+        valid.push(...list);
+      }
+    }
+    return valid;
+  }
+
+  // ---- delegation actions -------------------------------------------------
+
+  /**
+   * Union of ALL nodes' join/leave actions for a DAO (never trust one
+   * node for delegation state). Every signature is re-verified; dupes
+   * collapse on the full (address, height, seq, delegator, action, sig)
+   * identity.
+   */
+  async listDelegationActions(daoId: string): Promise<DelegationActionWire[]> {
+    await fakeLoadDelay();
+    const perNode = await this.fanOutGet<DelegationActionWire[]>(
+      `/delegations?dao=${encodeURIComponent(daoId)}`,
+      (json) => (json?.ok && Array.isArray(json.actions) ? json.actions : null),
+    );
+    const merged = new Map<string, DelegationActionWire>();
+    for (const actions of perNode) {
+      for (const action of actions) {
+        if (action.daoId !== daoId) continue;
+        const key = `${action.address}:${action.height}:${action.seq}:${action.delegatorId}:${action.action}:${action.signature}`;
+        if (merged.has(key)) continue;
+        if (!verifyDelegationAction(action).ok) continue;
+        merged.set(key, action);
+      }
+    }
+    return [...merged.values()];
+  }
+
+  async submitDelegationAction(action: DelegationActionWire): Promise<void> {
+    await this.fanOutPost('/delegations', action);
   }
 
   /**

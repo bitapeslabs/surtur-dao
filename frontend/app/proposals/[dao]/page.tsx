@@ -24,6 +24,8 @@ import { getDaoStore } from '@/lib/dao/store';
 import { fetchDaoOverviewCached } from '@/lib/dao/governance';
 import { useEspoHeight } from '@/hooks/useEspoHeight';
 import { useProposerEligibility } from '@/hooks/useProposerEligibility';
+import { resolveDelegationState, type DelegatorBundle } from '@surtur/shared';
+import { fetchSupplyAndHolders } from '@/lib/dao/governance';
 import Toast from '@/components/Toast';
 import { explorerAddressUrl } from '@/lib/config';
 import { getDao, type DaoDefinition } from '@/daos';
@@ -62,6 +64,50 @@ function SkeletonRows({ count }: { count: number }) {
         </div>
       ))}
     </>
+  );
+}
+
+function DelegationRow({
+  dao,
+  bundle,
+  members,
+  power,
+}: {
+  dao: DaoDefinition;
+  bundle: DelegatorBundle;
+  members: number;
+  power: bigint;
+}) {
+  const { t, p, locale } = useI18n();
+  const name =
+    locale === 'zh' && bundle.delegator.nameZh ? bundle.delegator.nameZh : bundle.delegator.name;
+  return (
+    <Link
+      href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`)}
+      className="oa-row px-5 py-4 flex items-center justify-between gap-3 cursor-pointer"
+    >
+      <div className="min-w-0">
+        <div className="text-sm font-medium truncate">{name}</div>
+        <div className="mt-1 text-xs text-[color:var(--oa-ink-secondary)] truncate">
+          {t('dlg.signer')}{' '}
+          <span className="text-[color:var(--oa-ink)]">
+            {shortAddress(bundle.delegator.delegator)}
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        <div className="text-right">
+          <div className="text-sm font-medium tabular-nums flex items-center justify-end gap-1.5">
+            {formatTokenCompact(power)}
+            <TokenIcon id={dao.votingToken.alkaneId} symbol={dao.votingToken.symbol} size="xs" />
+          </div>
+          <div className="mt-0.5 text-xs text-[color:var(--oa-ink-secondary)] tabular-nums">
+            {members === 1 ? t('dlg.addressOne') : t('dlg.addresses', { n: members.toLocaleString() })}
+          </div>
+        </div>
+        <ChevronRight size={15} className="text-[color:var(--oa-ink-tertiary)]" />
+      </div>
+    </Link>
   );
 }
 
@@ -161,18 +207,36 @@ export default function DaoProposalsPage() {
   // with the required amount instead of navigating (nodes reject such
   // proposals anyway; this explains upfront).
   const eligibility = useProposerEligibility(dao);
+  const dlgEligibility = useProposerEligibility(dao, dao?.delegatorThreshold);
   const [showThresholdToast, setShowThresholdToast] = useState(false);
+  // Proposals ↔ Delegations view; deep-linkable via ?view=delegations.
+  const [view, setView] = useState<'proposals' | 'delegations'>('proposals');
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('view') === 'delegations') {
+      setView('delegations');
+    }
+  }, []);
   // Bumped per click so a repeat click remounts the toast → re-shake.
   const [toastNonce, setToastNonce] = useState(0);
+  const activeEligibility = view === 'delegations' ? dlgEligibility : eligibility;
   const blockedByThreshold =
-    !eligibility.checking && !eligibility.eligible && eligibility.requiredAmount !== null;
+    !activeEligibility.checking &&
+    !activeEligibility.eligible &&
+    activeEligibility.requiredAmount !== null;
   const handleNewProposal = () => {
     if (!dao) return;
     if (blockedByThreshold) {
       setToastNonce((n) => n + 1);
       setShowThresholdToast(true);
+    } else {
+      router.push(
+        p(
+          view === 'delegations'
+            ? `/proposals/${dao.id}/delegations/new`
+            : `/proposals/${dao.id}/new`,
+        ),
+      );
     }
-    else router.push(p(`/proposals/${dao.id}/new`));
   };
 
   // The tip is polled by useEspoHeight; reserves + price cache against it
@@ -203,6 +267,59 @@ export default function DaoProposalsPage() {
     placeholderData: (prev) => prev,
   });
   const proposals = proposalsQuery.data ?? null;
+
+  // Delegations view data: delegators + full action history from the
+  // nodes, holder balances from espo for the FIRE totals.
+  const delegatorsQuery = useQuery({
+    queryKey: ['nodes', 'delegators', dao?.id],
+    queryFn: () => getDaoStore().listDelegators(dao!.id),
+    enabled: !!dao && view === 'delegations',
+    staleTime: Infinity,
+    placeholderData: (prev) => prev,
+  });
+  const delegationActionsQuery = useQuery({
+    queryKey: ['nodes', 'delegation-actions', dao?.id],
+    queryFn: () => getDaoStore().listDelegationActions(dao!.id),
+    enabled: !!dao && view === 'delegations',
+    staleTime: 30_000,
+  });
+  const delegationHoldersQuery = useQuery({
+    queryKey: ['espo', dao?.espoNetwork, 'supply-holders', dao?.id, height],
+    queryFn: () => fetchSupplyAndHolders(dao!),
+    enabled: !!dao && view === 'delegations' && height !== null,
+    staleTime: Infinity,
+    placeholderData: (prev) => prev,
+  });
+
+  // Sorted by total delegated FIRE, descending.
+  const delegationRows = useMemo(() => {
+    const bundles = delegatorsQuery.data;
+    if (!bundles) return null;
+    const actions = delegationActionsQuery.data ?? [];
+    const balances = new Map(
+      (delegationHoldersQuery.data?.holders ?? []).map((h) => [h.address, h.amount]),
+    );
+    const state =
+      height !== null ? resolveDelegationState(actions, height) : new Map<string, string>();
+    const membersByDelegator = new Map<string, string[]>();
+    for (const [address, delegatorId] of state) {
+      const list = membersByDelegator.get(delegatorId) ?? [];
+      list.push(address);
+      membersByDelegator.set(delegatorId, list);
+    }
+    return bundles
+      .map((bundle) => {
+        const owner = bundle.delegator.delegator;
+        const members = (membersByDelegator.get(bundle.delegator.id) ?? []).filter(
+          (address) => address !== owner,
+        );
+        // The owner is inherently a member — count + power include them.
+        let power = balances.get(owner) ?? 0n;
+        for (const member of members) power += balances.get(member) ?? 0n;
+        return { bundle, members: members.length + 1, power };
+      })
+      .sort((a, b) => (b.power > a.power ? 1 : b.power < a.power ? -1 : 0));
+  }, [delegatorsQuery.data, delegationActionsQuery.data, delegationHoldersQuery.data, height]);
 
   // Per-proposal vote totals (highest any node reports), refreshed with
   // the same block-change invalidation as the list itself.
@@ -310,11 +427,69 @@ export default function DaoProposalsPage() {
           onClick={handleNewProposal}
         >
           <Plus size={15} />
-          {t('dao.newProposal')}
+          {t(view === 'delegations' ? 'dlg.newDelegation' : 'dao.newProposal')}
         </button>
       </div>
 
-      {proposals !== null && proposals.length === 0 ? (
+      {/* Proposals ↔ Delegations segmented control (same treatment as the
+          votes card tabs: 2px gap, squared facing edges). */}
+      <div>
+        <div className="inline-flex rounded-full bg-[color:var(--oa-bg-subtle)] p-0.5 gap-0.5">
+          {(['proposals', 'delegations'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={`oa-hoverable px-3.5 py-1.5 text-xs font-medium ${
+                tab === 'proposals' ? 'rounded-l-full rounded-r-sm' : 'rounded-r-full rounded-l-sm'
+              } ${
+                view === tab
+                  ? 'bg-[color:var(--oa-bg-raised)] text-[color:var(--oa-ink)]'
+                  : 'text-[color:var(--oa-ink-secondary)] hover:text-[color:var(--oa-ink)]'
+              }`}
+              onClick={() => setView(tab)}
+              aria-pressed={view === tab}
+            >
+              {t(tab === 'proposals' ? 'dlg.tabProposals' : 'dlg.tabDelegations')}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {view === 'delegations' ? (
+        <section className="rounded-2xl overflow-hidden bg-[color:var(--oa-bg-raised)]">
+          {delegationRows === null && (
+            <div className="divide-y divide-[color:var(--oa-border)]">
+              <SkeletonRows count={3} />
+            </div>
+          )}
+          {delegationRows !== null && delegationRows.length === 0 && (
+            <div className="px-6 py-16 flex flex-col items-center text-center gap-3">
+              <ScrollText size={28} className="text-[color:var(--oa-ink-tertiary)]" />
+              <div>
+                <div className="text-sm font-medium mb-1">{t('dlg.none')}</div>
+                <p className="text-sm text-[color:var(--oa-ink-secondary)]">{t('dlg.noneHint')}</p>
+              </div>
+              <button type="button" className="oa-btn-secondary mt-2" onClick={handleNewProposal}>
+                <Plus size={15} />
+                {t('dlg.newDelegation')}
+              </button>
+            </div>
+          )}
+          {delegationRows !== null && delegationRows.length > 0 && (
+            <div className="divide-y divide-[color:var(--oa-border)]">
+              {delegationRows.map(({ bundle, members, power }) => (
+                <DelegationRow
+                  key={bundle.delegator.id}
+                  dao={dao}
+                  bundle={bundle}
+                  members={members}
+                  power={power}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : proposals !== null && proposals.length === 0 ? (
         <section className="rounded-2xl bg-[color:var(--oa-bg-raised)] px-6 py-16 flex flex-col items-center text-center gap-3">
           <ScrollText size={28} className="text-[color:var(--oa-ink-tertiary)]" />
           <div>
@@ -358,7 +533,7 @@ export default function DaoProposalsPage() {
         </section>
       )}
 
-      {active !== null && pageCount > 1 && (
+      {view === 'proposals' && active !== null && pageCount > 1 && (
         <div className="flex items-center justify-between text-sm text-[color:var(--oa-ink-secondary)]">
           <span>
             {t('dao.pageInfo', { page: clampedPage, pages: pageCount, total: active.length })}
@@ -388,13 +563,13 @@ export default function DaoProposalsPage() {
         </div>
       )}
 
-      {showThresholdToast && eligibility.requiredAmount !== null && (
+      {showThresholdToast && activeEligibility.requiredAmount !== null && (
         <Toast key={toastNonce} shake onClose={() => setShowThresholdToast(false)}>
           {t('dao.toastNeedPrefix') && (
             <span className="text-[color:var(--oa-ink-secondary)]">{t('dao.toastNeedPrefix')}</span>
           )}
           <span className="font-medium tabular-nums">
-            {formatTokenCompact(eligibility.requiredAmount)}
+            {formatTokenCompact(activeEligibility.requiredAmount)}
           </span>
           <TokenIcon
             id={dao.votingToken.alkaneId}
@@ -405,7 +580,7 @@ export default function DaoProposalsPage() {
         </Toast>
       )}
 
-      {past !== null && past.length > 0 && (
+      {view === 'proposals' && past !== null && past.length > 0 && (
         <>
           <h2 className="text-sm font-medium mt-2">{t('dao.past')}</h2>
           <section className="rounded-2xl overflow-hidden bg-[color:var(--oa-bg-raised)] -mt-3">

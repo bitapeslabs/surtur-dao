@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { SubfrostConnectError } from 'subfrost-connect';
@@ -23,11 +24,17 @@ import { useEspoHeight } from '@/hooks/useEspoHeight';
 import { getDaoStore } from '@/lib/dao/store';
 import type { Proposal, Vote, VoteChoice } from '@/lib/dao/types';
 import { fetchGovernanceSnapshot } from '@/lib/dao/governance';
+import {
+  computeDelegatedTally,
+  resolveDelegationState,
+  type DelegationActionWire,
+  type DelegatorBundle,
+} from '@surtur/shared';
 import { buildVoteMessage, formatTokenCompact, shortAddress } from '@/lib/dao/format';
 import { explorerAddressUrl } from '@/lib/config';
 import type { DaoDefinition } from '@/daos';
 import { resolveThreshold, thresholdPower as thresholdPowerOf } from '@surtur/shared';
-import { PhArrowUpRight } from '@/components/PhosphorIcons';
+import { PhArrowRight, PhArrowUpRight } from '@/components/PhosphorIcons';
 import Skeleton from '@/components/Skeleton';
 import TokenIcon from '@/components/TokenIcon';
 import { useI18n } from '@/hooks/useI18n';
@@ -119,6 +126,27 @@ export function useVoting(
     void queryClient.invalidateQueries({ queryKey: ['nodes', 'votes', proposalId] });
   }, [queryClient, proposalId]);
 
+  // Delegations reshape the tally: delegated addresses can't vote (their
+  // votes are IGNORED) and a delegator's vote carries every member's
+  // balance. Membership is resolved at the proposal's evaluation height
+  // (end block once closed, live tip while open) from the FULL action
+  // history — asking every node, never just one.
+  const delegatorsQuery = useQuery({
+    queryKey: ['nodes', 'delegators', dao?.id],
+    queryFn: () => getDaoStore().listDelegators(dao!.id),
+    enabled: !!dao && !!proposal,
+    staleTime: Infinity,
+    placeholderData: (prev) => prev,
+  });
+  const delegationActionsQuery = useQuery({
+    queryKey: ['nodes', 'delegation-actions', dao?.id],
+    queryFn: () => getDaoStore().listDelegationActions(dao!.id),
+    enabled: !!dao && !!proposal,
+    staleTime: 30_000,
+  });
+  const delegators: DelegatorBundle[] = delegatorsQuery.data ?? [];
+  const delegationActions: DelegationActionWire[] = delegationActionsQuery.data ?? [];
+
   // Supply + holders + reserves + price in ONE batched espo call.
   // Open proposals key on the live tip: a new block → new key → refetch;
   // same block → served from cache. Closed proposals key on their end
@@ -174,16 +202,27 @@ export function useVoting(
 
         if (verdict === null) {
           // Fallback: localStorage store mode, or the orchestrator/nodes
-          // are down — the legacy client-side computation.
+          // are down — the client-side computation (delegation-aware,
+          // same shared tally as the nodes).
           const snapshot = await fetchGovernanceSnapshot(dao, proposal.endBlock);
           const allVotes = await getDaoStore().listVotes(proposal.id);
+          const allActions = await getDaoStore().listDelegationActions(dao.id);
+          const allDelegators = await getDaoStore().listDelegators(dao.id);
           const balances = new Map(snapshot.holders.map((h) => [h.address, h.amount]));
-          let forPower = 0n;
-          for (const v of allVotes) {
-            if (v.choice === 'for') forPower += balances.get(v.address) ?? 0n;
-          }
+          const fallbackTally = computeDelegatedTally({
+            votes: allVotes.map((v) => ({ address: v.address, choice: v.choice })),
+            balances,
+            actions: allActions,
+            delegatorsBySigner: new Map(
+              allDelegators.map((b) => [b.delegator.delegator, b.delegator.id]),
+            ),
+            evalHeight: proposal.endBlock,
+          });
           const pctg = resolveThreshold(dao.votePassThreshold, proposal.endBlock);
-          verdict = forPower >= thresholdPowerOf(snapshot.supply, pctg) ? 'passed' : 'rejected';
+          verdict =
+            fallbackTally.forPower >= thresholdPowerOf(snapshot.supply, pctg)
+              ? 'passed'
+              : 'rejected';
         }
 
         const updated = await getDaoStore().updateProposalStatus(proposal.id, verdict);
@@ -210,38 +249,75 @@ export function useVoting(
     return map;
   }, [votes]);
 
-  // Voters ordered by voting-token balance desc: walk the (already
-  // sorted) holder list, then append voters holding none at all.
+  // Delegation state at the evaluation height (end block when closed,
+  // live tip while open).
+  const evalHeight = isClosed && proposal?.endBlock ? proposal.endBlock : (height ?? 0);
+  const delegatorsBySigner = useMemo(
+    () => new Map(delegators.map((b) => [b.delegator.delegator, b.delegator])),
+    [delegators],
+  );
+  const delegationState = useMemo(
+    () => resolveDelegationState(delegationActions, evalHeight),
+    [delegationActions, evalHeight],
+  );
+
+  // The ONE delegation-aware tally (shared with nodes + orchestrator):
+  // delegated voters ignored, delegator votes carry member balances.
+  const delegatedTally = useMemo(
+    () =>
+      computeDelegatedTally({
+        votes: (votes ?? []).map((v) => ({ address: v.address, choice: v.choice })),
+        balances: balanceByAddress,
+        actions: delegationActions,
+        delegatorsBySigner: new Map(
+          delegators.map((b) => [b.delegator.delegator, b.delegator.id]),
+        ),
+        evalHeight,
+      }),
+    [votes, balanceByAddress, delegationActions, delegators, evalHeight],
+  );
+
+  // Voters ordered by counted power desc. Delegated addresses' votes are
+  // ignored entirely; a delegator's row carries its delegation identity
+  // (name + link) and the combined power.
   const voterRows = useMemo(() => {
-    const rows: Array<{ address: string; choice: VoteChoice; amount: bigint }> = [];
-    for (const h of holders ?? []) {
-      const choice = choiceByAddress.get(h.address);
-      if (choice) rows.push({ address: h.address, choice, amount: h.amount });
-    }
+    const rows: Array<{
+      address: string;
+      choice: VoteChoice;
+      amount: bigint;
+      delegation?: { id: string; name: string; nameZh?: string };
+    }> = [];
     for (const v of votes ?? []) {
-      if (!balanceByAddress.has(v.address)) {
-        rows.push({ address: v.address, choice: v.choice, amount: 0n });
-      }
+      if (delegatedTally.ignored.has(v.address)) continue;
+      const amount = delegatedTally.powerByVoter.get(v.address) ?? 0n;
+      const delegator = delegatorsBySigner.get(v.address);
+      rows.push({
+        address: v.address,
+        choice: v.choice,
+        amount,
+        delegation: delegator
+          ? { id: delegator.id, name: delegator.name, nameZh: delegator.nameZh }
+          : undefined,
+      });
     }
+    rows.sort((a, b) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0));
     return rows;
-  }, [holders, votes, choiceByAddress, balanceByAddress]);
+  }, [votes, delegatedTally, delegatorsBySigner]);
 
   const tally = useMemo(() => {
-    let forPower = 0n;
-    let againstPower = 0n;
-    for (const row of voterRows) {
-      if (row.choice === 'for') forPower += row.amount;
-      else if (row.choice === 'against') againstPower += row.amount;
-    }
+    const forPower = delegatedTally.forPower;
+    const againstPower = delegatedTally.againstPower;
     const total = supply ?? 0n;
     const cast = forPower + againstPower;
     // Everything not explicitly for/against — including uncast supply —
     // counts as abstain.
     const abstainPower = total > cast ? total - cast : 0n;
     return { forPower, againstPower, abstainPower, total };
-  }, [voterRows, supply]);
+  }, [delegatedTally, supply]);
 
   const myChoice = session ? choiceByAddress.get(session.account.address) : undefined;
+  /** Connected wallet has delegated its power — voting is blocked. */
+  const iAmDelegated = session ? delegationState.has(session.account.address) : false;
 
   /** Voting is over — the tally shown is the static end-block state. */
   const closed = proposal !== null && proposal.status !== 'open';
@@ -256,7 +332,7 @@ export function useVoting(
   const neededPower = passPower > tally.forPower ? passPower - tally.forPower : 0n;
 
   const castVote = async (choice: VoteChoice) => {
-    if (!dao || !proposal || !session) return;
+    if (!dao || !proposal || !session || iAmDelegated) return;
     setVoteError(null);
     setSigning(choice);
     // Pre-open the passport popup synchronously in the click gesture
@@ -302,6 +378,7 @@ export function useVoting(
     session,
     connect,
     connecting,
+    iAmDelegated,
     dao,
     passPct,
     proposal,
@@ -327,10 +404,28 @@ export type VotingState = ReturnType<typeof useVoting>;
 
 /** Vote For / Abstain / Against row (connect CTA while disconnected). */
 export function VoteButtons({ voting }: { voting: VotingState }) {
-  const { hydrated, session, connect, connecting, myChoice, signing, castVote, closed } = voting;
+  const {
+    hydrated,
+    session,
+    connect,
+    connecting,
+    myChoice,
+    signing,
+    castVote,
+    closed,
+    iAmDelegated,
+  } = voting;
   const { t } = useI18n();
 
   if (closed) return null;
+
+  if (session && iAmDelegated) {
+    return (
+      <p className="text-sm text-[color:var(--oa-ink-secondary)] text-center">
+        {t('dlg.youDelegated')}
+      </p>
+    );
+  }
 
   if (hydrated && !session) {
     return (
@@ -386,7 +481,7 @@ export default function VotingSection({ voting }: { voting: VotingState }) {
     voterRows,
     neededPower,
   } = voting;
-  const { t } = useI18n();
+  const { t, p: pHref, locale } = useI18n();
   const votingSymbol = dao?.votingToken.symbol ?? '';
   const votingTokenId = dao?.votingToken.alkaneId ?? '';
 
@@ -609,37 +704,80 @@ export default function VotingSection({ voting }: { voting: VotingState }) {
         {!votersLoading &&
           voterRows
             .filter((row) => row.choice === voterTab)
-            .map((row, index) => (
-              <a
-                key={row.address}
-                href={explorerAddressUrl(row.address)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="oa-row group px-5 py-3.5 flex items-center justify-between gap-3"
-              >
-                <div className="min-w-0 flex items-center gap-2.5">
-                  <span className="w-6 shrink-0 text-xs text-[color:var(--oa-ink-tertiary)] tabular-nums">
-                    {index + 1}
-                  </span>
-                  <span className="text-sm font-medium truncate flex items-center gap-1">
-                    {shortAddress(row.address)}
-                    {session && row.address === session.account.address && (
-                      <span className="text-xs text-[color:var(--oa-ink-tertiary)]">
-                        {t('votes.you')}
+            .map((row, index) =>
+              row.delegation ? (
+                // Delegator vote — visually distinct (accent stripe +
+                // delegation badge), links to the delegation page.
+                <Link
+                  key={row.address}
+                  href={pHref(`/proposals/${dao?.id}/delegations/${row.delegation.id}`)}
+                  className="oa-row group px-5 py-3.5 flex items-center justify-between gap-3 border-l-2"
+                  style={{ borderLeftColor: CHOICE_META[row.choice].color }}
+                >
+                  <div className="min-w-0 flex items-center gap-2.5">
+                    <span className="w-6 shrink-0 text-xs text-[color:var(--oa-ink-tertiary)] tabular-nums">
+                      {index + 1}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="text-sm font-medium truncate flex items-center gap-1">
+                        {locale === 'zh' && row.delegation.nameZh
+                          ? row.delegation.nameZh
+                          : row.delegation.name}
+                        <span className="ml-1 align-middle text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-[color:var(--oa-bg-subtle)] text-[color:var(--oa-ink-secondary)]">
+                          {t('dlg.viaDelegation')}
+                        </span>
+                        <PhArrowRight
+                          size={13}
+                          className="shrink-0 text-[color:var(--oa-ink-tertiary)] opacity-0 group-hover:opacity-100"
+                        />
                       </span>
-                    )}
-                    <PhArrowUpRight
-                      size={13}
-                      className="shrink-0 text-[color:var(--oa-ink-tertiary)] opacity-0 group-hover:opacity-100"
-                    />
-                  </span>
-                </div>
-                <div className="text-sm font-medium tabular-nums shrink-0 flex items-center gap-1.5">
-                  {formatTokenCompact(row.amount)}
-                  <TokenIcon id={votingTokenId} symbol={votingSymbol} size="xs" />
-                </div>
-              </a>
-            ))}
+                      <span className="block text-xs text-[color:var(--oa-ink-secondary)] truncate">
+                        {shortAddress(row.address)}
+                        {session && row.address === session.account.address && (
+                          <span className="ml-1 text-[color:var(--oa-ink-tertiary)]">
+                            {t('votes.you')}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="text-sm font-medium tabular-nums shrink-0 flex items-center gap-1.5">
+                    {formatTokenCompact(row.amount)}
+                    <TokenIcon id={votingTokenId} symbol={votingSymbol} size="xs" />
+                  </div>
+                </Link>
+              ) : (
+                <a
+                  key={row.address}
+                  href={explorerAddressUrl(row.address)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="oa-row group px-5 py-3.5 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0 flex items-center gap-2.5">
+                    <span className="w-6 shrink-0 text-xs text-[color:var(--oa-ink-tertiary)] tabular-nums">
+                      {index + 1}
+                    </span>
+                    <span className="text-sm font-medium truncate flex items-center gap-1">
+                      {shortAddress(row.address)}
+                      {session && row.address === session.account.address && (
+                        <span className="text-xs text-[color:var(--oa-ink-tertiary)]">
+                          {t('votes.you')}
+                        </span>
+                      )}
+                      <PhArrowUpRight
+                        size={13}
+                        className="shrink-0 text-[color:var(--oa-ink-tertiary)] opacity-0 group-hover:opacity-100"
+                      />
+                    </span>
+                  </div>
+                  <div className="text-sm font-medium tabular-nums shrink-0 flex items-center gap-1.5">
+                    {formatTokenCompact(row.amount)}
+                    <TokenIcon id={votingTokenId} symbol={votingSymbol} size="xs" />
+                  </div>
+                </a>
+              ),
+            )}
 
         {!votersLoading &&
           votes !== null &&

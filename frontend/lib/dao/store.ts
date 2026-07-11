@@ -8,7 +8,12 @@
  * synchronous, so the interface already matches a network-backed store.
  */
 
-import type { ProposalBundle, ResolutionWire } from '@surtur/shared';
+import type {
+  DelegationActionWire,
+  DelegatorBundle,
+  ProposalBundle,
+  ResolutionWire,
+} from '@surtur/shared';
 import type { Proposal, ProposalPage, Vote } from './types';
 import { normalizeDaoId, getDao as getDaoDef } from '@/daos';
 import { SURTUR_NODES } from '@/surtur.config';
@@ -52,11 +57,26 @@ export interface DaoStore {
    * DAO's resolverSigner and gossip it across the network.
    */
   publishResolution(resolution: ResolutionWire): Promise<void>;
+  /** All delegators of a DAO (list rows are metadata-only from nodes). */
+  listDelegators(daoId: string): Promise<DelegatorBundle[]>;
+  /** Full delegator bundle (description included), or null. */
+  getDelegator(id: string): Promise<DelegatorBundle | null>;
+  /** Publish a SIGNED delegator bundle to every whitelisted node. */
+  publishDelegator(bundle: DelegatorBundle): Promise<void>;
+  /**
+   * ALL join/leave actions for a DAO (full nonce history — effective
+   * state is resolved client-side at any height). Union of every node.
+   */
+  listDelegationActions(daoId: string): Promise<DelegationActionWire[]>;
+  /** Publish a SIGNED join/leave action. */
+  submitDelegationAction(action: DelegationActionWire): Promise<void>;
 }
 
 const PROPOSALS_KEY = 'surtur:proposals';
 const VOTES_KEY = 'surtur:votes';
 const RESOLUTIONS_KEY = 'surtur:resolutions';
+const DELEGATORS_KEY = 'surtur:delegators';
+const DELEGATION_ACTIONS_KEY = 'surtur:delegation-actions';
 
 function readArray<T>(key: string): T[] {
   try {
@@ -161,6 +181,34 @@ class LocalStorageDaoStore implements DaoStore {
     const all = readArray<ResolutionWire>(RESOLUTIONS_KEY);
     if (all.some((r) => r.proposalId === resolution.proposalId)) return;
     localStorage.setItem(RESOLUTIONS_KEY, JSON.stringify([...all, resolution]));
+  }
+
+  async listDelegators(daoId: string): Promise<DelegatorBundle[]> {
+    await fakeLoadDelay();
+    return readArray<DelegatorBundle>(DELEGATORS_KEY).filter((b) => b.delegator.daoId === daoId);
+  }
+
+  async getDelegator(id: string): Promise<DelegatorBundle | null> {
+    await fakeLoadDelay();
+    return readArray<DelegatorBundle>(DELEGATORS_KEY).find((b) => b.delegator.id === id) ?? null;
+  }
+
+  async publishDelegator(bundle: DelegatorBundle): Promise<void> {
+    const all = readArray<DelegatorBundle>(DELEGATORS_KEY);
+    if (all.some((b) => b.delegator.id === bundle.delegator.id)) return;
+    localStorage.setItem(DELEGATORS_KEY, JSON.stringify([...all, bundle]));
+  }
+
+  async listDelegationActions(daoId: string): Promise<DelegationActionWire[]> {
+    await fakeLoadDelay();
+    return readArray<DelegationActionWire>(DELEGATION_ACTIONS_KEY).filter(
+      (a) => a.daoId === daoId,
+    );
+  }
+
+  async submitDelegationAction(action: DelegationActionWire): Promise<void> {
+    const all = readArray<DelegationActionWire>(DELEGATION_ACTIONS_KEY);
+    localStorage.setItem(DELEGATION_ACTIONS_KEY, JSON.stringify([...all, action]));
   }
 }
 

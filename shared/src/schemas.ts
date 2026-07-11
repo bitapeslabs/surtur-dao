@@ -67,6 +67,32 @@ export const proposalBundleSchema = z.object({
   signature: z.string().min(1).max(4096),
 });
 
+export const delegatorBundleSchema = z.object({
+  delegator: z.object({
+    id: z.string().regex(/^[0-9a-f]{64}$/),
+    daoId: z.string().min(1),
+    name: z.string().trim().min(1).max(120),
+    nameZh: z.string().trim().min(1).max(120).optional(),
+    description: z.string().min(1).max(20_000_000),
+    descriptionZh: z.string().min(1).max(20_000_000).optional(),
+    delegator: z.string().trim().min(1),
+    createdAtBlock: z.number().int().nonnegative(),
+    createdAt: z.string().refine((s) => Number.isFinite(Date.parse(s))),
+  }),
+  signature: z.string().min(1).max(4096),
+});
+
+export const delegationActionSchema = z.object({
+  daoId: z.string().min(1),
+  delegatorId: z.string().regex(/^[0-9a-f]{64}$/),
+  address: z.string().trim().min(1),
+  action: z.enum(['join', 'leave']),
+  height: z.number().int().nonnegative(),
+  seq: z.number().int().nonnegative().max(1_000_000),
+  signature: z.string().min(1).max(4096),
+  signedAt: z.string().refine((s) => Number.isFinite(Date.parse(s))),
+});
+
 export const resolutionWireSchema = z.object({
   proposalId: z.string().regex(/^[0-9a-f]{64}$/),
   daoId: z.string().min(1),

@@ -19,7 +19,14 @@ import { setDefaultResultOrder } from 'node:dns';
 import { setDefaultAutoSelectFamily } from 'node:net';
 import { getDao, type DaoDefinition } from '@/daos';
 import { SURTUR_NODES } from '@/surtur.config';
-import { resolveThreshold, thresholdPower, type VoteWire } from '@surtur/shared';
+import {
+  computeDelegatedTally,
+  resolveDelegationState,
+  resolveThreshold,
+  thresholdPower,
+  type DelegationActionWire,
+  type VoteWire,
+} from '@surtur/shared';
 import { fetchEspoHeight, fetchVerdictSnapshots } from '@/lib/dao/governance';
 
 // WSL2 / no-IPv6 environments: Node's fetch resolves Cloudflare hosts to
@@ -74,6 +81,51 @@ async function fetchNodeRows(daoId: string): Promise<ProposalRowMeta[] | null> {
   return null;
 }
 
+/** Union of delegation actions + delegator signers across all nodes. */
+async function fetchDelegationContext(daoId: string): Promise<{
+  actions: DelegationActionWire[];
+  delegatorsBySigner: Map<string, string>;
+}> {
+  const actionKeys = new Set<string>();
+  const actions: DelegationActionWire[] = [];
+  const delegatorsBySigner = new Map<string, string>();
+  await Promise.all(
+    SURTUR_NODES.map(async (base) => {
+      try {
+        const [actionsRes, delegatorsRes] = await Promise.all([
+          fetch(`${base}/delegations?dao=${encodeURIComponent(daoId)}`, {
+            signal: AbortSignal.timeout(NODE_TIMEOUT_MS),
+            cache: 'no-store',
+          }).then((r) => r.json()),
+          fetch(`${base}/delegators?dao=${encodeURIComponent(daoId)}`, {
+            signal: AbortSignal.timeout(NODE_TIMEOUT_MS),
+            cache: 'no-store',
+          }).then((r) => r.json()),
+        ]);
+        if (actionsRes?.ok && Array.isArray(actionsRes.actions)) {
+          for (const a of actionsRes.actions as DelegationActionWire[]) {
+            const key = `${a.address}:${a.height}:${a.seq}:${a.delegatorId}:${a.action}:${a.signature}`;
+            if (!actionKeys.has(key)) {
+              actionKeys.add(key);
+              actions.push(a);
+            }
+          }
+        }
+        if (delegatorsRes?.ok && Array.isArray(delegatorsRes.delegators)) {
+          for (const b of delegatorsRes.delegators) {
+            if (b?.delegator?.delegator && b?.delegator?.id) {
+              delegatorsBySigner.set(b.delegator.delegator, b.delegator.id);
+            }
+          }
+        }
+      } catch {
+        /* node unreachable */
+      }
+    }),
+  );
+  return { actions, delegatorsBySigner };
+}
+
 /** Union of votes across all whitelisted nodes (one vote per address). */
 async function fetchNodeVotes(proposalId: string): Promise<VoteWire[]> {
   const byAddress = new Map<string, VoteWire>();
@@ -120,8 +172,8 @@ async function sweepDao(dao: DaoDefinition, rows: ProposalRowMeta[]): Promise<vo
   if (ended.length === 0) return;
 
   // The one espo cold fetch: every unresolved proposal's pinned snapshot
-  // in a single batch, votes fetched from nodes in parallel.
-  const [snapshots, votesById] = await Promise.all([
+  // in a single batch; votes + delegation context from nodes in parallel.
+  const [snapshots, votesById, delegationCtx] = await Promise.all([
     fetchVerdictSnapshots(
       dao,
       ended.map((row) => ({ proposalId: row.id, endBlock: row.endBlock! })),
@@ -129,20 +181,24 @@ async function sweepDao(dao: DaoDefinition, rows: ProposalRowMeta[]): Promise<vo
     Promise.all(ended.map(async (row) => [row.id, await fetchNodeVotes(row.id)] as const)).then(
       (pairs) => new Map(pairs),
     ),
+    fetchDelegationContext(dao.id),
   ]);
 
   for (const row of ended) {
     const snapshot = snapshots.get(row.id);
     if (!snapshot) continue;
     const balances = new Map(snapshot.holders.map((h) => [h.address, h.amount]));
-    let forPower = 0n;
-    for (const v of votesById.get(row.id) ?? []) {
-      if (v.choice === 'for') forPower += balances.get(v.address) ?? 0n;
-    }
+    const tally = computeDelegatedTally({
+      votes: (votesById.get(row.id) ?? []).map((v) => ({ address: v.address, choice: v.choice })),
+      balances,
+      actions: delegationCtx.actions,
+      delegatorsBySigner: delegationCtx.delegatorsBySigner,
+      evalHeight: row.endBlock!,
+    });
     const pctg = resolveThreshold(dao.votePassThreshold, row.endBlock!);
     verdictCache.set(
       row.id,
-      snapshot.supply > 0n && forPower >= thresholdPower(snapshot.supply, pctg)
+      snapshot.supply > 0n && tally.forPower >= thresholdPower(snapshot.supply, pctg)
         ? 'passed'
         : 'rejected',
     );

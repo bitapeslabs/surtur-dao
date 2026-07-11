@@ -13,19 +13,31 @@
 
 import { Router, type Request, type Response } from 'express';
 import {
+  delegationActionSchema,
+  delegatorBundleSchema,
   isValidAddress,
   proposalBundleSchema,
   resolutionWireSchema,
+  verifyDelegationAction,
+  verifyDelegatorBundle,
   verifyProposalBundle,
   verifyResolutionWire,
   verifyVoteWire,
   voteWireSchema,
+  type DelegationActionWire,
+  type DelegatorBundle,
   type ProposalBundle,
   type ResolutionWire,
   type VoteWire,
 } from '@surtur/shared';
 import * as db from './db';
-import { computeVerdict, fetchEspoTip, proposerMeetsThreshold, voterHoldsToken } from './espo';
+import {
+  computeVerdict,
+  delegatorMeetsThreshold,
+  fetchEspoTip,
+  proposerMeetsThreshold,
+  voterHoldsToken,
+} from './espo';
 import { relayToPeers } from './relay';
 
 export const router = Router();
@@ -213,6 +225,171 @@ router.post('/votes', async (req: Request, res: Response) => {
   }
 });
 
+// ---- delegators -------------------------------------------------------
+
+/** Anti-backdating allowance for creation blocks and action nonces. */
+const HEIGHT_ALLOWANCE = 5;
+
+/** Metadata list (descriptions stripped — GET /delegators/:id has them). */
+router.get('/delegators', async (req: Request, res: Response) => {
+  try {
+    const daoId = typeof req.query.dao === 'string' ? req.query.dao : undefined;
+    const bundles = await db.listDelegators(daoId);
+    const delegators = bundles.map(({ delegator, signature }) => {
+      const { description: _d, descriptionZh: _dz, ...meta } = delegator;
+      return { delegator: meta, signature };
+    });
+    res.json({ ok: true, delegators });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+router.get('/delegators/:id', async (req: Request, res: Response) => {
+  try {
+    const bundle = await db.getDelegator(req.params.id);
+    if (!bundle) {
+      res.status(404).json({ ok: false, error: 'not found' });
+      return;
+    }
+    res.json({ ok: true, ...bundle });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+router.post('/delegators', async (req: Request, res: Response) => {
+  try {
+    const parsed = delegatorBundleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? 'invalid' });
+      return;
+    }
+    const bundle = parsed.data as DelegatorBundle;
+
+    if (await db.getDelegator(bundle.delegator.id)) {
+      res.json({ ok: true, known: true });
+      return;
+    }
+
+    const dao = await db.getDao(bundle.delegator.daoId);
+    if (!dao || dao.enabled === false) {
+      res.status(400).json({ ok: false, error: 'unknown or disabled dao' });
+      return;
+    }
+    if (!isValidAddress(bundle.delegator.delegator, dao.espoNetwork)) {
+      res.status(400).json({ ok: false, error: 'invalid delegator address' });
+      return;
+    }
+
+    const integrity = verifyDelegatorBundle(bundle);
+    if (!integrity.ok) {
+      res.status(400).json({ ok: false, error: integrity.error });
+      return;
+    }
+
+    // Creation block must be ~the live tip (anti-backdating into a
+    // cheaper threshold era or a moment the creator was richer).
+    const tip = await fetchEspoTip(dao.espoUrl);
+    if (Math.abs(bundle.delegator.createdAtBlock - tip) > HEIGHT_ALLOWANCE) {
+      res.status(400).json({
+        ok: false,
+        error: `createdAtBlock ${bundle.delegator.createdAtBlock} outside tip±${HEIGHT_ALLOWANCE} (tip ${tip})`,
+      });
+      return;
+    }
+
+    if (!(await delegatorMeetsThreshold(dao, bundle.delegator.delegator, bundle.delegator.createdAtBlock))) {
+      res.status(403).json({ ok: false, error: 'creator below delegator threshold at creation block' });
+      return;
+    }
+
+    await db.insertDelegator(bundle);
+    res.json({ ok: true });
+    void relayToPeers('/delegators', bundle);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+// ---- delegation actions -------------------------------------------------
+
+/**
+ * GET /delegations?dao=<id>[&addresses=a,b,c] — ALL join/leave actions
+ * (full history: clients resolve effective state at any height). The
+ * optional address filter serves the votes-tally path.
+ */
+router.get('/delegations', async (req: Request, res: Response) => {
+  try {
+    const daoId = typeof req.query.dao === 'string' ? req.query.dao : '';
+    if (!daoId) {
+      res.status(400).json({ ok: false, error: 'dao query param required' });
+      return;
+    }
+    const addresses =
+      typeof req.query.addresses === 'string' && req.query.addresses.length > 0
+        ? req.query.addresses.split(',').map((a) => a.trim()).filter(Boolean)
+        : undefined;
+    res.json({ ok: true, actions: await db.listDelegationActions(daoId, addresses) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+router.post('/delegations', async (req: Request, res: Response) => {
+  try {
+    const parsed = delegationActionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? 'invalid' });
+      return;
+    }
+    const action = parsed.data as DelegationActionWire;
+
+    if (await db.hasDelegationAction(action)) {
+      res.json({ ok: true, known: true });
+      return;
+    }
+
+    const delegatorBundle = await db.getDelegator(action.delegatorId);
+    if (!delegatorBundle || delegatorBundle.delegator.daoId !== action.daoId) {
+      res.status(400).json({ ok: false, error: 'unknown delegator' });
+      return;
+    }
+    const dao = await db.getDao(action.daoId);
+    if (!dao) {
+      res.status(400).json({ ok: false, error: 'unknown dao' });
+      return;
+    }
+    if (!isValidAddress(action.address, dao.espoNetwork)) {
+      res.status(400).json({ ok: false, error: 'invalid member address' });
+      return;
+    }
+
+    const integrity = verifyDelegationAction(action);
+    if (!integrity.ok) {
+      res.status(400).json({ ok: false, error: integrity.error });
+      return;
+    }
+
+    // The nonce height must be ~the live tip — so effective-state
+    // history can't be rewritten by backdated joins/leaves.
+    const tip = await fetchEspoTip(dao.espoUrl);
+    if (Math.abs(action.height - tip) > HEIGHT_ALLOWANCE) {
+      res.status(400).json({
+        ok: false,
+        error: `nonce height ${action.height} outside tip±${HEIGHT_ALLOWANCE} (tip ${tip})`,
+      });
+      return;
+    }
+
+    await db.insertDelegationAction(action);
+    res.json({ ok: true });
+    void relayToPeers('/delegations', action);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 // ---- vote counts ------------------------------------------------------
 
 /**
@@ -335,8 +512,18 @@ async function refreshVerdicts(
       verdictInFlight.add(row.proposal.id);
       try {
         const votes = await db.listVotes(row.proposal.id);
-        const forVoters = votes.filter((v) => v.choice === 'for').map((v) => v.address);
-        const verdict = await computeVerdict(dao, row.proposal.endBlock, forVoters);
+        const actions = await db.listDelegationActions(row.proposal.daoId);
+        const delegators = await db.listDelegators(row.proposal.daoId);
+        const delegatorsBySigner = new Map(
+          delegators.map((b) => [b.delegator.delegator, b.delegator.id]),
+        );
+        const verdict = await computeVerdict(
+          dao,
+          row.proposal.endBlock,
+          votes,
+          actions,
+          delegatorsBySigner,
+        );
         await db.setProposalStatus(row.proposal.id, verdict);
         row.status = verdict;
       } catch (e) {

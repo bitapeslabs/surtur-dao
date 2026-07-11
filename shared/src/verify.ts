@@ -15,6 +15,13 @@ import {
   computeProposalId,
   computeResolutionId,
 } from './proposal';
+import {
+  buildDelegationActionMessage,
+  buildDelegatorSignMessage,
+  computeDelegatorId,
+  type DelegationActionWire,
+  type DelegatorBundle,
+} from './delegation';
 import type { ProposalBundle, ResolutionWire, VoteWire } from './types';
 
 /** Pick the bitcoinjs network from a bech32 address prefix. */
@@ -52,6 +59,44 @@ export function verifyProposalBundle(bundle: ProposalBundle): VerifyResult {
     network,
   });
   return valid ? { ok: true } : { ok: false, error: 'invalid proposer signature' };
+}
+
+/**
+ * Integrity + signature check for a delegator bundle:
+ *  1. id matches the sha256 of the canonical content;
+ *  2. the creator's BIP-322 signature over the create message verifies.
+ * (The 0.5%-at-creation-block check needs espo and lives with the caller.)
+ */
+export function verifyDelegatorBundle(bundle: DelegatorBundle): VerifyResult {
+  const { id, ...content } = bundle.delegator;
+  if (computeDelegatorId(content) !== id) {
+    return { ok: false, error: 'delegator id mismatch: content does not hash to its id' };
+  }
+  const network = networkForAddress(bundle.delegator.delegator);
+  if (!network) return { ok: false, error: 'unsupported delegator address' };
+  const valid = verifyMessageSimple({
+    message: buildDelegatorSignMessage(id),
+    address: bundle.delegator.delegator,
+    signature: bundle.signature,
+    network,
+  });
+  return valid ? { ok: true } : { ok: false, error: 'invalid delegator signature' };
+}
+
+/**
+ * Integrity + signature check for a delegation join/leave action. The
+ * nonce-height tip allowance (±5) is node-side (needs the live tip).
+ */
+export function verifyDelegationAction(action: DelegationActionWire): VerifyResult {
+  const network = networkForAddress(action.address);
+  if (!network) return { ok: false, error: 'unsupported member address' };
+  const valid = verifyMessageSimple({
+    message: buildDelegationActionMessage(action),
+    address: action.address,
+    signature: action.signature,
+    network,
+  });
+  return valid ? { ok: true } : { ok: false, error: 'invalid delegation action signature' };
 }
 
 /**

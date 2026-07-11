@@ -1,4 +1,5 @@
 export * from './types';
+export * from './delegation';
 export * from './proposal';
 export * from './verify';
 export * from './schemas';

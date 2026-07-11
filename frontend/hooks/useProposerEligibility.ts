@@ -11,7 +11,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { resolveThreshold, thresholdPower } from '@surtur/shared';
+import { resolveThreshold, thresholdPower, type ThresholdSchedule } from '@surtur/shared';
 import type { DaoDefinition } from '@/daos';
 import { useVendorWallet } from '@/context/VendorWalletContext';
 import { useEspoHeight } from '@/hooks/useEspoHeight';
@@ -30,18 +30,24 @@ export interface ProposerEligibility {
   requiredAmount: bigint | null;
 }
 
-export function useProposerEligibility(dao: DaoDefinition | null): ProposerEligibility {
+export function useProposerEligibility(
+  dao: DaoDefinition | null,
+  /** Which threshold schedule to gate on — proposals by default; pass
+   *  dao.delegatorThreshold for the create-delegation flow. */
+  schedule?: ThresholdSchedule,
+): ProposerEligibility {
   const { session } = useVendorWallet();
   const address = session?.account.address ?? null;
   const { data: tipData } = useEspoHeight(dao?.espoNetwork);
   const tip = tipData ?? null;
 
+  const activeSchedule = schedule ?? dao?.proposalThreshold ?? [];
   const requiredPct = dao
-    ? resolveThreshold(dao.proposalThreshold, tip ?? Number.MAX_SAFE_INTEGER)
+    ? resolveThreshold(activeSchedule, tip ?? Number.MAX_SAFE_INTEGER)
     : 0;
 
   const share = useQuery({
-    queryKey: ['espo', dao?.espoNetwork, 'proposer-share', address, tip],
+    queryKey: ['espo', dao?.espoNetwork, 'proposer-share', address, tip, requiredPct],
     queryFn: () => fetchProposerShare(dao!, address!),
     enabled: !!dao && !!address && tip !== null && requiredPct > 0,
     staleTime: Infinity,

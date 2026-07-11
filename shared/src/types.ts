@@ -127,6 +127,8 @@ export interface OrchestratorDao {
   proposalThreshold: ThresholdSchedule;
   /** Fork-height schedule for the vote-pass threshold. */
   votePassThreshold: ThresholdSchedule;
+  /** Fork-height schedule for the create-delegator threshold. */
+  delegatorThreshold: ThresholdSchedule;
   espoNetwork: string;
   espoUrl: string;
 }

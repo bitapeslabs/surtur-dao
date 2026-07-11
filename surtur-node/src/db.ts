@@ -12,7 +12,16 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { OrchestratorDao, ProposalWire, ResolutionWire, VoteWire } from '@surtur/shared';
+import type {
+  DelegationActionWire,
+  DelegatorBundle,
+  DelegatorWire,
+  OrchestratorDao,
+  ProposalWire,
+  ResolutionWire,
+  VoteWire,
+} from '@surtur/shared';
+import { compareActions } from '@surtur/shared';
 import { DATABASE_FILE } from './config';
 
 mkdirSync(dirname(DATABASE_FILE), { recursive: true });
@@ -54,6 +63,31 @@ export async function migrate(): Promise<void> {
     signature TEXT NOT NULL,
     resolved_at TEXT NOT NULL
   )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS delegators (
+    id TEXT PRIMARY KEY,
+    dao_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    name_zh TEXT,
+    description TEXT NOT NULL,
+    description_zh TEXT,
+    delegator TEXT NOT NULL,
+    created_at_block INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    signature TEXT NOT NULL
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_delegators_dao ON delegators (dao_id)');
+  db.exec(`CREATE TABLE IF NOT EXISTS delegation_actions (
+    dao_id TEXT NOT NULL,
+    delegator_id TEXT NOT NULL,
+    address TEXT NOT NULL,
+    action TEXT NOT NULL,
+    height INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    signature TEXT NOT NULL,
+    signed_at TEXT NOT NULL,
+    PRIMARY KEY (dao_id, address, height, seq, delegator_id, action)
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_delegation_actions_dao ON delegation_actions (dao_id)');
   db.exec('CREATE TABLE IF NOT EXISTS peers (url TEXT PRIMARY KEY)');
   db.exec('CREATE TABLE IF NOT EXISTS daos (id TEXT PRIMARY KEY, config TEXT NOT NULL)');
 }
@@ -211,6 +245,137 @@ export async function getVoteCountsByDao(daoId: string): Promise<Record<string, 
   const counts: Record<string, number> = {};
   for (const row of rows) counts[row.proposal_id] = Number(row.n);
   return counts;
+}
+
+// ---- delegators -------------------------------------------------------
+
+interface DelegatorRow {
+  id: string;
+  dao_id: string;
+  name: string;
+  name_zh: string | null;
+  description: string;
+  description_zh: string | null;
+  delegator: string;
+  created_at_block: number;
+  created_at: string;
+  signature: string;
+}
+
+function rowToDelegator(row: DelegatorRow): DelegatorBundle {
+  const wire: DelegatorWire = {
+    id: row.id,
+    daoId: row.dao_id,
+    name: row.name,
+    nameZh: row.name_zh ?? undefined,
+    description: row.description,
+    descriptionZh: row.description_zh ?? undefined,
+    delegator: row.delegator,
+    createdAtBlock: row.created_at_block,
+    createdAt: row.created_at,
+  };
+  return { delegator: wire, signature: row.signature };
+}
+
+export async function getDelegator(id: string): Promise<DelegatorBundle | null> {
+  const row = db.prepare('SELECT * FROM delegators WHERE id = ?').get(id) as
+    | DelegatorRow
+    | undefined;
+  return row ? rowToDelegator(row) : null;
+}
+
+export async function listDelegators(daoId?: string): Promise<DelegatorBundle[]> {
+  const rows = (
+    daoId
+      ? db.prepare('SELECT * FROM delegators WHERE dao_id = ? ORDER BY created_at DESC').all(daoId)
+      : db.prepare('SELECT * FROM delegators ORDER BY created_at DESC').all()
+  ) as unknown as DelegatorRow[];
+  return rows.map(rowToDelegator);
+}
+
+export async function insertDelegator(bundle: DelegatorBundle): Promise<void> {
+  const d = bundle.delegator;
+  db.prepare(
+    `INSERT OR IGNORE INTO delegators
+      (id, dao_id, name, name_zh, description, description_zh, delegator,
+       created_at_block, created_at, signature)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    d.id,
+    d.daoId,
+    d.name,
+    d.nameZh ?? null,
+    d.description,
+    d.descriptionZh ?? null,
+    d.delegator,
+    d.createdAtBlock,
+    d.createdAt,
+    bundle.signature,
+  );
+}
+
+// ---- delegation actions -------------------------------------------------
+
+interface ActionRow {
+  dao_id: string;
+  delegator_id: string;
+  address: string;
+  action: string;
+  height: number;
+  seq: number;
+  signature: string;
+  signed_at: string;
+}
+
+function rowToAction(row: ActionRow): DelegationActionWire {
+  return {
+    daoId: row.dao_id,
+    delegatorId: row.delegator_id,
+    address: row.address,
+    action: row.action as DelegationActionWire['action'],
+    height: row.height,
+    seq: row.seq,
+    signature: row.signature,
+    signedAt: row.signed_at,
+  };
+}
+
+export async function listDelegationActions(
+  daoId: string,
+  addresses?: string[],
+): Promise<DelegationActionWire[]> {
+  let rows: ActionRow[];
+  if (addresses && addresses.length > 0) {
+    const placeholders = addresses.map(() => '?').join(',');
+    rows = db
+      .prepare(
+        `SELECT * FROM delegation_actions WHERE dao_id = ? AND address IN (${placeholders})`,
+      )
+      .all(daoId, ...addresses) as unknown as ActionRow[];
+  } else {
+    rows = db
+      .prepare('SELECT * FROM delegation_actions WHERE dao_id = ?')
+      .all(daoId) as unknown as ActionRow[];
+  }
+  return rows.map(rowToAction);
+}
+
+export async function hasDelegationAction(a: DelegationActionWire): Promise<boolean> {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM delegation_actions
+       WHERE dao_id = ? AND address = ? AND height = ? AND seq = ? AND delegator_id = ? AND action = ?`,
+    )
+    .get(a.daoId, a.address, a.height, a.seq, a.delegatorId, a.action);
+  return row !== undefined;
+}
+
+export async function insertDelegationAction(a: DelegationActionWire): Promise<void> {
+  db.prepare(
+    `INSERT OR IGNORE INTO delegation_actions
+      (dao_id, delegator_id, address, action, height, seq, signature, signed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(a.daoId, a.delegatorId, a.address, a.action, a.height, a.seq, a.signature, a.signedAt);
 }
 
 // ---- resolutions ------------------------------------------------------

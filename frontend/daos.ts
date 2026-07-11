@@ -59,6 +59,13 @@ export interface DaoDefinition {
    * immune to later threshold changes.
    */
   votePassThreshold: ThresholdSchedule;
+  /**
+   * Fork-height schedule for the share of circulating voting token an
+   * address must hold to CREATE a delegator — resolved at the
+   * delegation's creation block. Enforced by surtur nodes AND re-checked
+   * client-side.
+   */
+  delegatorThreshold: ThresholdSchedule;
   /** Network whose Espo instance serves this DAO's token data. */
   espoNetwork: string;
 }
@@ -80,15 +87,13 @@ export const DAOS: DaoDefinition[] = [
     votingToken: { alkaneId: '2:77623', symbol: 'FIRE' },
     // Test resolver — the dev wallet used while testing the flow.
     resolverSigner: 'bc1psn0925c2p5mjnvkg0xkntpd26wtcyktmwt3shuw7ue04yed5sjfs7xwmj4',
-    // 0.5% from genesis — DELIBERATELY retroactive: proposals whose
-    // proposer held less at their start block are invalid everywhere
-    // (the FE prunes them and nodes reject new ones).
     proposalThreshold: [{ height: 0, pctg: 0.5 }],
     // 40% before the test fork, 0.05% after — deliberately tiny so the
     // passed-proposal → resolution flow is testable with a small wallet.
     votePassThreshold: [
       { height: 0, pctg: 40 },
     ],
+    delegatorThreshold: [{ height: 0, pctg: 0.5 }],
     espoNetwork: 'mainnet',
   },
   {
@@ -109,6 +114,7 @@ export const DAOS: DaoDefinition[] = [
       { height: 957018, pctg: 0.5 },
     ],
     votePassThreshold: [{ height: 0, pctg: 40 }],
+    delegatorThreshold: [{ height: 0, pctg: 0.5 }],
     espoNetwork: 'mainnet',
   },
 ];

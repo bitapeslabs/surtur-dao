@@ -111,6 +111,57 @@ export const MESSAGES = {
   'prop.treasuryAfter': { en: 'Treasury after transfers', zh: '转账后金库余额' },
   'prop.closeImageAria': { en: 'Close image', zh: '关闭图片' },
 
+  // Delegations
+  'dlg.tabProposals': { en: 'Proposals', zh: '提案' },
+  'dlg.tabDelegations': { en: 'Delegations', zh: '委托' },
+  'dlg.newDelegation': { en: 'New delegation', zh: '创建委托' },
+  'dlg.none': { en: 'No delegations yet', zh: '暂无委托' },
+  'dlg.noneHint': {
+    en: 'Create a delegation to vote with the combined power of its members.',
+    zh: '创建一个委托，以成员的合计票权进行投票。',
+  },
+  'dlg.signer': { en: 'Signer', zh: '签名人' },
+  'dlg.addresses': { en: '{n} addresses', zh: '{n} 个地址' },
+  'dlg.addressOne': { en: '1 address', zh: '1 个地址' },
+  'dlg.name': { en: 'Delegation name', zh: '委托名称' },
+  'dlg.nameZh': { en: 'Chinese name', zh: '中文名称' },
+  'dlg.description': { en: 'Description', zh: '描述' },
+  'dlg.descriptionPlaceholder': {
+    en: 'Describe this delegation — its goals and how it will vote…',
+    zh: '描述该委托 — 其目标以及投票方式…',
+  },
+  'dlg.create': { en: 'Create delegation', zh: '创建委托' },
+  'dlg.creating': { en: 'Creating…', zh: '创建中…' },
+  'dlg.backToDao': { en: 'Back', zh: '返回' },
+  'dlg.delegate': { en: 'Delegate', zh: '委托' },
+  'dlg.leave': { en: 'Leave delegation', zh: '退出委托' },
+  'dlg.signing': { en: 'Signing…', zh: '签名中…' },
+  'dlg.connectToDelegate': { en: 'Connect wallet to delegate', zh: '连接钱包以进行委托' },
+  'dlg.youAreMember': {
+    en: 'Your voting power is delegated here.',
+    zh: '您的票权已委托于此。',
+  },
+  'dlg.memberElsewhere': {
+    en: 'Delegating here moves your voting power from your current delegation.',
+    zh: '委托于此将把您的票权从当前委托转移过来。',
+  },
+  'dlg.totalPower': { en: 'Total delegated', zh: '合计委托' },
+  'dlg.members': { en: 'Members', zh: '成员' },
+  'dlg.owner': { en: 'Owner', zh: '所有者' },
+  'dlg.createdAtBlock': { en: 'Created at block', zh: '创建区块' },
+  'dlg.thresholdNote': {
+    en: 'Creating a delegation requires holding {pct}% of circulating supply.',
+    zh: '创建委托需要持有流通量的 {pct}%。',
+  },
+  'dlg.nameRequired': { en: 'Name is required.', zh: '名称为必填项。' },
+  'dlg.descriptionRequired': { en: 'Description is required.', zh: '描述为必填项。' },
+  'dlg.addChinese': { en: 'Add Chinese version', zh: '添加中文版本' },
+  'dlg.viaDelegation': { en: 'Delegation', zh: '委托' },
+  'dlg.youDelegated': {
+    en: 'Your voting power is delegated — your delegation votes for you.',
+    zh: '您的票权已委托 — 由您的委托代您投票。',
+  },
+
   // Wallet connect
   'wallet.connectTitle': { en: 'Connect a wallet', zh: '连接钱包' },
   'wallet.passportHint': {

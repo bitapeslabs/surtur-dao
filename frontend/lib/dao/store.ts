@@ -11,9 +11,11 @@
 import type {
   DelegationActionWire,
   DelegatorBundle,
+  DelegatorUpdateWire,
   ProposalBundle,
   ResolutionWire,
 } from '@surtur/shared';
+import { compareActions } from '@surtur/shared';
 import type { Proposal, ProposalPage, Vote } from './types';
 import { normalizeDaoId, getDao as getDaoDef } from '@/daos';
 import { SURTUR_NODES } from '@/surtur.config';
@@ -63,6 +65,8 @@ export interface DaoStore {
   getDelegator(id: string): Promise<DelegatorBundle | null>;
   /** Publish a SIGNED delegator bundle to every whitelisted node. */
   publishDelegator(bundle: DelegatorBundle): Promise<void>;
+  /** Publish a SIGNED owner metadata update (highest nonce wins). */
+  publishDelegatorUpdate(update: DelegatorUpdateWire): Promise<void>;
   /**
    * ALL join/leave actions for a DAO (full nonce history — effective
    * state is resolved client-side at any height). Union of every node.
@@ -197,6 +201,16 @@ class LocalStorageDaoStore implements DaoStore {
     const all = readArray<DelegatorBundle>(DELEGATORS_KEY);
     if (all.some((b) => b.delegator.id === bundle.delegator.id)) return;
     localStorage.setItem(DELEGATORS_KEY, JSON.stringify([...all, bundle]));
+  }
+
+  async publishDelegatorUpdate(update: DelegatorUpdateWire): Promise<void> {
+    const all = readArray<DelegatorBundle>(DELEGATORS_KEY);
+    const next = all.map((b) => {
+      if (b.delegator.id !== update.delegatorId) return b;
+      if (b.update && compareActions(update, b.update) <= 0) return b;
+      return { ...b, update };
+    });
+    localStorage.setItem(DELEGATORS_KEY, JSON.stringify(next));
   }
 
   async listDelegationActions(daoId: string): Promise<DelegationActionWire[]> {

@@ -1,96 +1,125 @@
 'use client';
 
 /**
- * Create a delegation — same look and flow as the new-proposal page:
- * bare borderless title input, full-width Milkdown editor, dashed
- * add-Chinese-version section, cancel/submit row. Submitting fetches
- * the fresh tip (nodes enforce createdAtBlock within tip±5), hashes the
- * canonical content into the delegator id, signs
- * "Create delegator with delegator id: <id>", and fans the bundle out
- * to every whitelisted node. Requires the DAO's delegatorThreshold at
- * the creation block — gated here, enforced by nodes.
+ * Edit a delegation's metadata (owner only) — name, description,
+ * Chinese versions, icon. Publishing signs a nonce-versioned update
+ * ("Update delegator <id> with update id: <sha256>"); every node and
+ * client keeps the version with the highest (height, seq) nonce, so
+ * edits converge network-wide without touching the immutable creation
+ * bundle or the delegator's id.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Loader2, Plus } from 'lucide-react';
 import { SubfrostConnectError } from 'subfrost-connect';
 import {
-  buildDelegatorSignMessage,
-  computeDelegatorId,
-  type DelegatorContent,
+  buildDelegatorUpdateSignMessage,
+  computeDelegatorUpdateId,
+  effectiveDelegatorMeta,
 } from '@surtur/shared';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getDao } from '@/daos';
 import { getDaoStore } from '@/lib/dao/store';
 import { fetchEspoHeight } from '@/lib/dao/governance';
 import { stripLeadingEmptyBlocks } from '@/lib/dao/format';
 import { useVendorWallet } from '@/context/VendorWalletContext';
-import { useProposerEligibility } from '@/hooks/useProposerEligibility';
 import { useI18n } from '@/hooks/useI18n';
 import MarkdownEditor from '@/components/MarkdownEditor';
 import DelegationIconPicker from '@/components/DelegationIconPicker';
 import InfoTip from '@/components/InfoTip';
+import Skeleton from '@/components/Skeleton';
 
-export default function NewDelegationPage() {
-  const params = useParams<{ dao: string }>();
+export default function EditDelegationPage() {
+  const params = useParams<{ dao: string; id: string }>();
   const dao = getDao(params?.dao);
   const router = useRouter();
   const { t, p } = useI18n();
-  const { hydrated, session, connect, connecting, signMessage, openSignPopup } =
-    useVendorWallet();
-  const eligibility = useProposerEligibility(dao, dao?.delegatorThreshold);
+  const queryClient = useQueryClient();
+  const { session, signMessage, openSignPopup } = useVendorWallet();
+
+  const bundleQuery = useQuery({
+    queryKey: ['nodes', 'delegator', params?.id],
+    queryFn: () => getDaoStore().getDelegator(params!.id),
+    enabled: !!params?.id,
+    staleTime: Infinity,
+  });
+  const bundle = bundleQuery.data ?? null;
 
   const [name, setName] = useState('');
   const [nameZh, setNameZh] = useState('');
   const [icon, setIcon] = useState<string | null>(null);
   const [withZh, setWithZh] = useState(false);
+  const [seeded, setSeeded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const descriptionRef = useRef('');
   const descriptionZhRef = useRef('');
 
+  // Seed the form once from the current effective metadata.
+  useEffect(() => {
+    if (!bundle || seeded) return;
+    const meta = effectiveDelegatorMeta(bundle);
+    setName(meta.name);
+    setNameZh(meta.nameZh ?? '');
+    setIcon(meta.icon ?? null);
+    setWithZh(!!(meta.nameZh || meta.descriptionZh));
+    descriptionRef.current = meta.description;
+    descriptionZhRef.current = meta.descriptionZh ?? '';
+    setSeeded(true);
+  }, [bundle, seeded]);
+
   if (!dao) return null;
 
-  const canSubmit =
-    !submitting && name.trim().length > 0 && eligibility.eligible && !eligibility.checking;
+  const isOwner = !!bundle && !!session && session.account.address === bundle.delegator.delegator;
+  const canSubmit = !submitting && seeded && name.trim().length > 0 && isOwner;
 
   const submit = async () => {
-    if (!canSubmit || !session) return;
+    if (!canSubmit || !session || !bundle) return;
     const description = stripLeadingEmptyBlocks(descriptionRef.current).trim();
     if (!description) {
       setError(t('dlg.descriptionRequired'));
       return;
     }
     setError(null);
-    // Pre-open the passport popup in the click gesture (Safari-safe).
     const popup = openSignPopup('signMessage');
     setSubmitting(true);
     try {
       const tip = await fetchEspoHeight(dao.espoNetwork);
-      const content: DelegatorContent = {
+      // Nonce beats the currently-served update (and any same-height one).
+      const current = bundle.update;
+      const seq = current && current.height === tip ? current.seq + 1 : 0;
+      const content = {
         daoId: dao.id,
+        delegatorId: bundle.delegator.id,
         name: name.trim(),
         nameZh: withZh && nameZh.trim() ? nameZh.trim() : undefined,
         description,
-        icon: icon ?? undefined,
         descriptionZh:
           withZh && descriptionZhRef.current.trim()
             ? stripLeadingEmptyBlocks(descriptionZhRef.current).trim()
             : undefined,
-        delegator: session.account.address,
-        createdAtBlock: tip,
-        createdAt: new Date().toISOString(),
+        icon: icon ?? undefined,
+        height: tip,
+        seq,
       };
-      const id = computeDelegatorId(content);
-      const { signature, address } = await signMessage(buildDelegatorSignMessage(id), {
-        popup,
-      });
-      if (address !== content.delegator) {
-        throw new Error('Signing account does not match the connected account.');
+      const updateId = computeDelegatorUpdateId(content);
+      const { signature, address } = await signMessage(
+        buildDelegatorUpdateSignMessage(bundle.delegator.id, updateId),
+        { popup },
+      );
+      if (address !== bundle.delegator.delegator) {
+        throw new Error('Signing account is not the delegation owner.');
       }
-      await getDaoStore().publishDelegator({ delegator: { ...content, id }, signature });
-      router.push(p(`/proposals/${dao.id}?view=delegations`));
+      await getDaoStore().publishDelegatorUpdate({
+        ...content,
+        signature,
+        updatedAt: new Date().toISOString(),
+      });
+      await queryClient.invalidateQueries({ queryKey: ['nodes', 'delegator', bundle.delegator.id] });
+      await queryClient.invalidateQueries({ queryKey: ['nodes', 'delegators', dao.id] });
+      router.push(p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`));
     } catch (e) {
       if (
         e instanceof SubfrostConnectError &&
@@ -106,26 +135,19 @@ export default function NewDelegationPage() {
     }
   };
 
-  if (hydrated && !session) {
+  if (bundleQuery.isPending || !seeded) {
     return (
       <main className="max-w-3xl mx-auto px-5 py-10 flex flex-col gap-6">
-        <div>
-          <Link
-            href={p(`/proposals/${dao.id}?view=delegations`)}
-            className="oa-btn-ghost !px-2 -ml-2"
-          >
-            <ArrowLeft size={15} />
-            {dao.name}
-          </Link>
-        </div>
-        <section className="rounded-2xl bg-[color:var(--oa-bg-raised)] px-6 py-16 flex flex-col items-center text-center gap-4">
-          <div className="text-sm text-[color:var(--oa-ink-secondary)]">
-            {t('dlg.connectToDelegate')}
-          </div>
-          <button type="button" className="oa-btn-primary" onClick={connect} disabled={connecting}>
-            {connecting ? t('header.connecting') : t('header.connect')}
-          </button>
-        </section>
+        <Skeleton className="h-8 w-2/3" />
+        <Skeleton className="h-40 w-full" />
+      </main>
+    );
+  }
+
+  if (!bundle || (session && !isOwner)) {
+    return (
+      <main className="max-w-3xl mx-auto px-5 py-10">
+        <div className="text-sm text-[color:var(--oa-ink-tertiary)]">Not found.</div>
       </main>
     );
   }
@@ -134,11 +156,11 @@ export default function NewDelegationPage() {
     <main className="max-w-3xl mx-auto px-5 py-10 flex flex-col gap-6">
       <div>
         <Link
-          href={p(`/proposals/${dao.id}?view=delegations`)}
+          href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`)}
           className="oa-btn-ghost !px-2 -ml-2 mb-3"
         >
           <ArrowLeft size={15} />
-          {dao.name}
+          {t('dlg.backToDao')}
         </Link>
         <input
           type="text"
@@ -152,11 +174,10 @@ export default function NewDelegationPage() {
 
       <DelegationIconPicker value={icon} onChange={setIcon} />
 
-      {/* No overflow-hidden here: Crepe's slash menu and block handle are
-          absolutely positioned and would be clipped. */}
       <section className="rounded-2xl bg-[color:var(--oa-bg-raised)]">
         <MarkdownEditor
           className="oa-editor"
+          defaultValue={descriptionRef.current}
           placeholder={t('dlg.descriptionPlaceholder')}
           onChange={(md) => {
             descriptionRef.current = md;
@@ -164,8 +185,6 @@ export default function NewDelegationPage() {
         />
       </section>
 
-      {/* Optional Chinese version — when provided, zh readers see it
-          instead of the English name/description. */}
       {withZh ? (
         <section className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
@@ -192,6 +211,7 @@ export default function NewDelegationPage() {
           <section className="rounded-2xl bg-[color:var(--oa-bg-raised)]">
             <MarkdownEditor
               className="oa-editor"
+              defaultValue={descriptionZhRef.current}
               placeholder={t('dlg.descriptionPlaceholder')}
               onChange={(md) => {
                 descriptionZhRef.current = md;
@@ -210,21 +230,18 @@ export default function NewDelegationPage() {
         </button>
       )}
 
-      {!eligibility.checking && !eligibility.eligible && (
-        <div className="text-sm text-[color:var(--oa-danger)]">
-          {t('dlg.thresholdNote', { pct: String(eligibility.requiredPct) })}
-        </div>
-      )}
-
       {error && <div className="text-sm text-[color:var(--oa-danger)]">{error}</div>}
 
       <div className="flex items-center justify-end gap-2 pb-6">
-        <Link href={p(`/proposals/${dao.id}?view=delegations`)} className="oa-btn-secondary">
+        <Link
+          href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`)}
+          className="oa-btn-secondary"
+        >
           {t('create.cancel')}
         </Link>
         <button type="button" className="oa-btn-primary" onClick={submit} disabled={!canSubmit}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
-          {t('dlg.create')}
+          {submitting ? t('dlg.saving') : t('dlg.saveChanges')}
         </button>
       </div>
     </main>

@@ -28,12 +28,39 @@ export interface DelegatorContent {
   /** Markdown. */
   description: string;
   descriptionZh?: string;
+  /** Optional icon as a base64 data URI (≤5 MB source image). */
+  icon?: string;
   /** The address that signs (and votes) for the delegation. */
   delegator: string;
   /** Block the 0.5% eligibility is verified at (~tip at creation). */
   createdAtBlock: number;
   /** ISO 8601. */
   createdAt: string;
+}
+
+/**
+ * A metadata update pushed by the delegation OWNER. Versioned by the
+ * same (height, seq) nonce scheme as membership actions — every node
+ * and client keeps the version with the HIGHEST nonce (exact ties break
+ * on smallest signature). The delegator's id and creation bundle stay
+ * immutable; only display metadata changes.
+ */
+export interface DelegatorUpdateWire {
+  daoId: string;
+  delegatorId: string;
+  name: string;
+  nameZh?: string;
+  description: string;
+  descriptionZh?: string;
+  icon?: string;
+  /** Nonce part 1: espo tip at signing (nodes allow ±5 blocks). */
+  height: number;
+  /** Nonce part 2: intra-block sequence. */
+  seq: number;
+  /** BIP-322 simple by the OWNER over the update message. */
+  signature: string;
+  /** ISO 8601 (informational). */
+  updatedAt: string;
 }
 
 export interface DelegatorWire extends DelegatorContent {
@@ -45,6 +72,26 @@ export interface DelegatorBundle {
   delegator: DelegatorWire;
   /** BIP-322 simple by the delegator address over the create message. */
   signature: string;
+  /** Highest-nonce metadata update, when the owner has pushed one. */
+  update?: DelegatorUpdateWire;
+}
+
+/** Display metadata: the latest update when present, else creation. */
+export function effectiveDelegatorMeta(bundle: DelegatorBundle): {
+  name: string;
+  nameZh?: string;
+  description: string;
+  descriptionZh?: string;
+  icon?: string;
+} {
+  const src = bundle.update ?? bundle.delegator;
+  return {
+    name: src.name,
+    nameZh: src.nameZh,
+    description: src.description,
+    descriptionZh: src.descriptionZh,
+    icon: src.icon,
+  };
 }
 
 export type DelegationActionKind = 'join' | 'leave';
@@ -74,10 +121,45 @@ export function canonicalizeDelegator(d: DelegatorContent): string {
     nameZh: d.nameZh ?? '',
     description: d.description,
     descriptionZh: d.descriptionZh ?? '',
+    // Only present when set — keeps pre-icon delegator ids verifiable.
+    ...(d.icon ? { icon: d.icon } : {}),
     delegator: d.delegator,
     createdAtBlock: d.createdAtBlock,
     createdAt: d.createdAt,
   });
+}
+
+export function canonicalizeDelegatorUpdate(
+  u: Omit<DelegatorUpdateWire, 'signature' | 'updatedAt'>,
+): string {
+  return JSON.stringify({
+    daoId: u.daoId,
+    delegatorId: u.delegatorId,
+    name: u.name,
+    nameZh: u.nameZh ?? '',
+    description: u.description,
+    descriptionZh: u.descriptionZh ?? '',
+    icon: u.icon ?? '',
+    height: u.height,
+    seq: u.seq,
+  });
+}
+
+export function computeDelegatorUpdateId(
+  u: Omit<DelegatorUpdateWire, 'signature' | 'updatedAt'>,
+): string {
+  return Buffer.from(
+    bitcoin.crypto.sha256(Buffer.from(canonicalizeDelegatorUpdate(u), 'utf8')),
+  ).toString('hex');
+}
+
+/** The message the owner signs to update metadata. The id commits to
+ *  every field including the nonce. */
+export function buildDelegatorUpdateSignMessage(
+  delegatorId: string,
+  updateId: string,
+): string {
+  return `Update delegator ${delegatorId} with update id: ${updateId}`;
 }
 
 export function computeDelegatorId(d: DelegatorContent): string {
@@ -108,9 +190,16 @@ export function buildDelegationActionMessage(
 
 // ---- nonce ordering + effective state ----------------------------------
 
+/** Anything carrying the (height, seq, signature) nonce triple. */
+export interface NonceCarrier {
+  height: number;
+  seq: number;
+  signature: string;
+}
+
 /** (height, seq) ordering; exact ties break on ascending signature so
  *  every node/client picks the same winner. Returns >0 if a wins. */
-export function compareActions(a: DelegationActionWire, b: DelegationActionWire): number {
+export function compareActions(a: NonceCarrier, b: NonceCarrier): number {
   if (a.height !== b.height) return a.height - b.height;
   if (a.seq !== b.seq) return a.seq - b.seq;
   // Lower signature WINS a tie — so "a beats b" when a.signature < b.signature.

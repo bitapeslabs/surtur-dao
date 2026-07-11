@@ -24,7 +24,7 @@ import { getDaoStore } from '@/lib/dao/store';
 import { fetchDaoOverviewCached } from '@/lib/dao/governance';
 import { useEspoHeight } from '@/hooks/useEspoHeight';
 import { useProposerEligibility } from '@/hooks/useProposerEligibility';
-import { resolveDelegationState, type DelegatorBundle } from '@surtur/shared';
+import { effectiveDelegatorMeta, resolveDelegationState, type DelegatorBundle } from '@surtur/shared';
 import { fetchSupplyAndHolders } from '@/lib/dao/governance';
 import Toast from '@/components/Toast';
 import { explorerAddressUrl } from '@/lib/config';
@@ -79,20 +79,28 @@ function DelegationRow({
   power: bigint;
 }) {
   const { t, p, locale } = useI18n();
-  const name =
-    locale === 'zh' && bundle.delegator.nameZh ? bundle.delegator.nameZh : bundle.delegator.name;
+  const meta = effectiveDelegatorMeta(bundle);
+  const name = locale === 'zh' && meta.nameZh ? meta.nameZh : meta.name;
   return (
     <Link
       href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`)}
       className="oa-row px-5 py-4 flex items-center justify-between gap-3 cursor-pointer"
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex items-center gap-3">
+        {meta.icon && (
+          <span className="h-9 w-9 rounded-full overflow-hidden shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={meta.icon} alt="" className="h-full w-full object-cover" />
+          </span>
+        )}
+        <div className="min-w-0">
         <div className="text-sm font-medium truncate">{name}</div>
         <div className="mt-1 text-xs text-[color:var(--oa-ink-secondary)] truncate">
           {t('dlg.signer')}{' '}
           <span className="text-[color:var(--oa-ink)]">
             {shortAddress(bundle.delegator.delegator)}
           </span>
+        </div>
         </div>
       </div>
       <div className="flex items-center gap-3 shrink-0">

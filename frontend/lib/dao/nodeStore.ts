@@ -18,10 +18,13 @@ import {
   thresholdPower,
   verifyProposalBundle,
   verifyVoteWire,
+  compareActions,
   verifyDelegatorBundle,
   verifyDelegationAction,
+  verifyDelegatorUpdate,
   type DelegationActionWire,
   type DelegatorBundle,
+  type DelegatorUpdateWire,
   type ProposalBundle,
   type ProposalWire,
   type ResolutionWire,
@@ -446,7 +449,16 @@ export class NodeDaoStore implements DaoStore {
     for (const bundles of perNode) {
       for (const bundle of bundles) {
         if (bundle.delegator.daoId !== daoId) continue;
-        if (!merged.has(bundle.delegator.id)) merged.set(bundle.delegator.id, bundle);
+        const current = merged.get(bundle.delegator.id);
+        if (!current) {
+          merged.set(bundle.delegator.id, bundle);
+          continue;
+        }
+        // Nodes may hold different metadata versions — keep the highest
+        // update nonce (a row with any update beats one with none).
+        const a = bundle.update;
+        const b = current.update;
+        if (a && (!b || compareActions(a, b) > 0)) merged.set(bundle.delegator.id, bundle);
       }
     }
     return this.filterValidDelegators([...merged.values()], { optimistic: true });
@@ -458,16 +470,34 @@ export class NodeDaoStore implements DaoStore {
       `/delegators/${encodeURIComponent(id)}`,
       (json) => (json?.ok && json.delegator ? (json as DelegatorBundle) : null),
     );
-    const bundle = rows.find((b) => b.delegator.id === id);
-    if (!bundle) return null;
-    // Full bundle → verify id integrity + signature client-side.
-    if (!verifyDelegatorBundle(bundle).ok) return null;
+    const matches = rows.filter((b) => b.delegator.id === id);
+    if (matches.length === 0) return null;
+    // Highest-nonce metadata update across the nodes' answers.
+    let bundle = matches[0];
+    for (const candidate of matches.slice(1)) {
+      const a = candidate.update;
+      const b = bundle.update;
+      if (a && (!b || compareActions(a, b) > 0)) bundle = candidate;
+    }
+    // Full bundle → verify creation id integrity + signature, and the
+    // update's owner signature when present (drop a bad update, keep
+    // the verified creation metadata).
+    if (!verifyDelegatorBundle({ delegator: bundle.delegator, signature: bundle.signature }).ok) {
+      return null;
+    }
+    if (bundle.update && !verifyDelegatorUpdate(bundle.update, bundle.delegator.delegator).ok) {
+      bundle = { ...bundle, update: undefined };
+    }
     const valid = await this.filterValidDelegators([bundle], { optimistic: false });
     return valid.length ? bundle : null;
   }
 
   async publishDelegator(bundle: DelegatorBundle): Promise<void> {
     await this.fanOutPost('/delegators', bundle);
+  }
+
+  async publishDelegatorUpdate(update: DelegatorUpdateWire): Promise<void> {
+    await this.fanOutPost('/delegator-updates', update);
   }
 
   /**

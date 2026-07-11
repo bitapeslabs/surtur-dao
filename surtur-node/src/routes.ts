@@ -15,6 +15,9 @@ import { Router, type Request, type Response } from 'express';
 import {
   delegationActionSchema,
   delegatorBundleSchema,
+  delegatorUpdateSchema,
+  verifyDelegatorUpdate,
+  type DelegatorUpdateWire,
   isValidAddress,
   proposalBundleSchema,
   resolutionWireSchema,
@@ -235,9 +238,16 @@ router.get('/delegators', async (req: Request, res: Response) => {
   try {
     const daoId = typeof req.query.dao === 'string' ? req.query.dao : undefined;
     const bundles = await db.listDelegators(daoId);
-    const delegators = bundles.map(({ delegator, signature }) => {
+    const delegators = bundles.map(({ delegator, signature, update }) => {
+      // Metadata only: strip the (potentially huge) markdown bodies.
+      // Icons stay — the list renders them.
       const { description: _d, descriptionZh: _dz, ...meta } = delegator;
-      return { delegator: meta, signature };
+      let updateMeta;
+      if (update) {
+        const { description: _ud, descriptionZh: _udz, ...rest } = update;
+        updateMeta = rest;
+      }
+      return { delegator: meta, signature, update: updateMeta };
     });
     res.json({ ok: true, delegators });
   } catch (e) {
@@ -307,6 +317,61 @@ router.post('/delegators', async (req: Request, res: Response) => {
     await db.insertDelegator(bundle);
     res.json({ ok: true });
     void relayToPeers('/delegators', bundle);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
+/**
+ * POST /delegator-updates — the delegation OWNER changes metadata
+ * (name / description / Chinese versions / icon). Nonce-versioned like
+ * membership actions: highest (height, seq) wins everywhere, height
+ * must be within tip±5.
+ */
+router.post('/delegator-updates', async (req: Request, res: Response) => {
+  try {
+    const parsed = delegatorUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? 'invalid' });
+      return;
+    }
+    const update = parsed.data as DelegatorUpdateWire;
+
+    const stored = await db.getDelegator(update.delegatorId);
+    if (!stored || stored.delegator.daoId !== update.daoId) {
+      res.status(400).json({ ok: false, error: 'unknown delegator' });
+      return;
+    }
+    const dao = await db.getDao(update.daoId);
+    if (!dao) {
+      res.status(400).json({ ok: false, error: 'unknown dao' });
+      return;
+    }
+
+    // Only the OWNER may update metadata.
+    const integrity = verifyDelegatorUpdate(update, stored.delegator.delegator);
+    if (!integrity.ok) {
+      res.status(403).json({ ok: false, error: integrity.error });
+      return;
+    }
+
+    const tip = await fetchEspoTip(dao.espoUrl);
+    if (Math.abs(update.height - tip) > HEIGHT_ALLOWANCE) {
+      res.status(400).json({
+        ok: false,
+        error: `nonce height ${update.height} outside tip±${HEIGHT_ALLOWANCE} (tip ${tip})`,
+      });
+      return;
+    }
+
+    const applied = await db.applyDelegatorUpdate(update);
+    if (!applied) {
+      // Our stored version wins (or ties) — acknowledge, stop the gossip.
+      res.json({ ok: true, known: true });
+      return;
+    }
+    res.json({ ok: true });
+    void relayToPeers('/delegator-updates', update);
   } catch (e) {
     res.status(500).json({ ok: false, error: (e as Error).message });
   }

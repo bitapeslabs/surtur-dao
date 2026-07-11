@@ -18,9 +18,12 @@ import {
 import {
   buildDelegationActionMessage,
   buildDelegatorSignMessage,
+  buildDelegatorUpdateSignMessage,
   computeDelegatorId,
+  computeDelegatorUpdateId,
   type DelegationActionWire,
   type DelegatorBundle,
+  type DelegatorUpdateWire,
 } from './delegation';
 import type { ProposalBundle, ResolutionWire, VoteWire } from './types';
 
@@ -67,6 +70,25 @@ export function verifyProposalBundle(bundle: ProposalBundle): VerifyResult {
  *  2. the creator's BIP-322 signature over the create message verifies.
  * (The 0.5%-at-creation-block check needs espo and lives with the caller.)
  */
+/**
+ * Integrity + signature check for a metadata update. Whether the signer
+ * is the delegation's OWNER needs the stored bundle and lives with the
+ * caller (nodes check it; the FE checks against the verified bundle).
+ */
+export function verifyDelegatorUpdate(update: DelegatorUpdateWire, owner: string): VerifyResult {
+  const network = networkForAddress(owner);
+  if (!network) return { ok: false, error: 'unsupported owner address' };
+  const { signature, updatedAt: _u, ...content } = update;
+  const updateId = computeDelegatorUpdateId(content);
+  const valid = verifyMessageSimple({
+    message: buildDelegatorUpdateSignMessage(update.delegatorId, updateId),
+    address: owner,
+    signature,
+    network,
+  });
+  return valid ? { ok: true } : { ok: false, error: 'invalid delegator update signature' };
+}
+
 export function verifyDelegatorBundle(bundle: DelegatorBundle): VerifyResult {
   const { id, ...content } = bundle.delegator;
   if (computeDelegatorId(content) !== id) {

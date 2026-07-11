@@ -15,6 +15,7 @@ import { dirname } from 'node:path';
 import type {
   DelegationActionWire,
   DelegatorBundle,
+  DelegatorUpdateWire,
   DelegatorWire,
   OrchestratorDao,
   ProposalWire,
@@ -76,6 +77,26 @@ export async function migrate(): Promise<void> {
     signature TEXT NOT NULL
   )`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_delegators_dao ON delegators (dao_id)');
+  // Additive migrations (sqlite has no ADD COLUMN IF NOT EXISTS):
+  // creation icon + the latest owner metadata update (nonce-versioned).
+  for (const ddl of [
+    'ALTER TABLE delegators ADD COLUMN icon TEXT',
+    'ALTER TABLE delegators ADD COLUMN upd_name TEXT',
+    'ALTER TABLE delegators ADD COLUMN upd_name_zh TEXT',
+    'ALTER TABLE delegators ADD COLUMN upd_description TEXT',
+    'ALTER TABLE delegators ADD COLUMN upd_description_zh TEXT',
+    'ALTER TABLE delegators ADD COLUMN upd_icon TEXT',
+    'ALTER TABLE delegators ADD COLUMN upd_height INTEGER',
+    'ALTER TABLE delegators ADD COLUMN upd_seq INTEGER',
+    'ALTER TABLE delegators ADD COLUMN upd_signature TEXT',
+    'ALTER TABLE delegators ADD COLUMN upd_updated_at TEXT',
+  ]) {
+    try {
+      db.exec(ddl);
+    } catch {
+      /* column already exists */
+    }
+  }
   db.exec(`CREATE TABLE IF NOT EXISTS delegation_actions (
     dao_id TEXT NOT NULL,
     delegator_id TEXT NOT NULL,
@@ -256,10 +277,20 @@ interface DelegatorRow {
   name_zh: string | null;
   description: string;
   description_zh: string | null;
+  icon: string | null;
   delegator: string;
   created_at_block: number;
   created_at: string;
   signature: string;
+  upd_name: string | null;
+  upd_name_zh: string | null;
+  upd_description: string | null;
+  upd_description_zh: string | null;
+  upd_icon: string | null;
+  upd_height: number | null;
+  upd_seq: number | null;
+  upd_signature: string | null;
+  upd_updated_at: string | null;
 }
 
 function rowToDelegator(row: DelegatorRow): DelegatorBundle {
@@ -270,11 +301,28 @@ function rowToDelegator(row: DelegatorRow): DelegatorBundle {
     nameZh: row.name_zh ?? undefined,
     description: row.description,
     descriptionZh: row.description_zh ?? undefined,
+    icon: row.icon ?? undefined,
     delegator: row.delegator,
     createdAtBlock: row.created_at_block,
     createdAt: row.created_at,
   };
-  return { delegator: wire, signature: row.signature };
+  const update: DelegatorUpdateWire | undefined =
+    row.upd_signature !== null && row.upd_height !== null && row.upd_seq !== null
+      ? {
+          daoId: row.dao_id,
+          delegatorId: row.id,
+          name: row.upd_name ?? row.name,
+          nameZh: row.upd_name_zh ?? undefined,
+          description: row.upd_description ?? row.description,
+          descriptionZh: row.upd_description_zh ?? undefined,
+          icon: row.upd_icon ?? undefined,
+          height: row.upd_height,
+          seq: row.upd_seq,
+          signature: row.upd_signature,
+          updatedAt: row.upd_updated_at ?? row.created_at,
+        }
+      : undefined;
+  return { delegator: wire, signature: row.signature, update };
 }
 
 export async function getDelegator(id: string): Promise<DelegatorBundle | null> {
@@ -297,9 +345,9 @@ export async function insertDelegator(bundle: DelegatorBundle): Promise<void> {
   const d = bundle.delegator;
   db.prepare(
     `INSERT OR IGNORE INTO delegators
-      (id, dao_id, name, name_zh, description, description_zh, delegator,
+      (id, dao_id, name, name_zh, description, description_zh, icon, delegator,
        created_at_block, created_at, signature)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     d.id,
     d.daoId,
@@ -307,11 +355,47 @@ export async function insertDelegator(bundle: DelegatorBundle): Promise<void> {
     d.nameZh ?? null,
     d.description,
     d.descriptionZh ?? null,
+    d.icon ?? null,
     d.delegator,
     d.createdAtBlock,
     d.createdAt,
     bundle.signature,
   );
+}
+
+/**
+ * Apply a metadata update iff its nonce beats the stored one (creation
+ * counts as nonce (createdAtBlock, -1); ties break on smallest
+ * signature via compareActions). Returns true when applied.
+ */
+export async function applyDelegatorUpdate(update: DelegatorUpdateWire): Promise<boolean> {
+  const row = db.prepare('SELECT * FROM delegators WHERE id = ?').get(update.delegatorId) as
+    | DelegatorRow
+    | undefined;
+  if (!row) return false;
+  const current =
+    row.upd_signature !== null && row.upd_height !== null && row.upd_seq !== null
+      ? { height: row.upd_height, seq: row.upd_seq, signature: row.upd_signature }
+      : null;
+  if (current && compareActions(update, current) <= 0) return false;
+  db.prepare(
+    `UPDATE delegators SET
+       upd_name = ?, upd_name_zh = ?, upd_description = ?, upd_description_zh = ?,
+       upd_icon = ?, upd_height = ?, upd_seq = ?, upd_signature = ?, upd_updated_at = ?
+     WHERE id = ?`,
+  ).run(
+    update.name,
+    update.nameZh ?? null,
+    update.description,
+    update.descriptionZh ?? null,
+    update.icon ?? null,
+    update.height,
+    update.seq,
+    update.signature,
+    update.updatedAt,
+    update.delegatorId,
+  );
+  return true;
 }
 
 // ---- delegation actions -------------------------------------------------

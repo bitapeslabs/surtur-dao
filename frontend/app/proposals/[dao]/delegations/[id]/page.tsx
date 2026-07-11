@@ -9,11 +9,13 @@
  */
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import {
   buildDelegationActionMessage,
+  effectiveDelegatorMeta,
   resolveDelegationState,
   type DelegationActionWire,
 } from '@surtur/shared';
@@ -183,12 +185,10 @@ export default function DelegationDetailPage() {
     );
   }
 
-  const name =
-    locale === 'zh' && bundle.delegator.nameZh ? bundle.delegator.nameZh : bundle.delegator.name;
+  const meta = effectiveDelegatorMeta(bundle);
+  const name = locale === 'zh' && meta.nameZh ? meta.nameZh : meta.name;
   const description =
-    locale === 'zh' && bundle.delegator.descriptionZh
-      ? bundle.delegator.descriptionZh
-      : bundle.delegator.description;
+    locale === 'zh' && meta.descriptionZh ? meta.descriptionZh : meta.description;
 
   return (
     <main className="max-w-3xl mx-auto px-5 py-10 flex flex-col gap-6">
@@ -213,7 +213,25 @@ export default function DelegationDetailPage() {
 
       <section className="rounded-2xl overflow-hidden bg-[color:var(--oa-bg-raised)]">
         <div className="p-6 pb-5">
-          <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {meta.icon && (
+                <span className="h-11 w-11 rounded-full overflow-hidden shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={meta.icon} alt="" className="h-full w-full object-cover" />
+                </span>
+              )}
+              <h1 className="text-2xl font-semibold tracking-tight truncate">{name}</h1>
+            </div>
+            {isSigner && (
+              <Link
+                href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}/edit`)}
+                className="oa-btn-secondary !px-4 !py-2 shrink-0"
+              >
+                {t('dlg.edit')}
+              </Link>
+            )}
+          </div>
           <div className="mt-3 flex flex-col gap-1.5 text-sm text-[color:var(--oa-ink-secondary)]">
             <span>
               {t('dlg.signer')}{' '}

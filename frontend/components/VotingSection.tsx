@@ -26,6 +26,7 @@ import type { Proposal, Vote, VoteChoice } from '@/lib/dao/types';
 import { fetchGovernanceSnapshot } from '@/lib/dao/governance';
 import {
   computeDelegatedTally,
+  effectiveDelegatorMeta,
   resolveDelegationState,
   type DelegationActionWire,
   type DelegatorBundle,
@@ -253,7 +254,7 @@ export function useVoting(
   // live tip while open).
   const evalHeight = isClosed && proposal?.endBlock ? proposal.endBlock : (height ?? 0);
   const delegatorsBySigner = useMemo(
-    () => new Map(delegators.map((b) => [b.delegator.delegator, b.delegator])),
+    () => new Map(delegators.map((b) => [b.delegator.delegator, b])),
     [delegators],
   );
   const delegationState = useMemo(
@@ -285,20 +286,24 @@ export function useVoting(
       address: string;
       choice: VoteChoice;
       amount: bigint;
-      delegation?: { id: string; name: string; nameZh?: string };
+      delegation?: { id: string; name: string; nameZh?: string; icon?: string };
     }> = [];
     for (const v of votes ?? []) {
       if (delegatedTally.ignored.has(v.address)) continue;
       const amount = delegatedTally.powerByVoter.get(v.address) ?? 0n;
-      const delegator = delegatorsBySigner.get(v.address);
-      rows.push({
-        address: v.address,
-        choice: v.choice,
-        amount,
-        delegation: delegator
-          ? { id: delegator.id, name: delegator.name, nameZh: delegator.nameZh }
-          : undefined,
-      });
+      const bundle = delegatorsBySigner.get(v.address);
+      let delegation;
+      if (bundle) {
+        // Latest owner update wins for display (name/icon).
+        const meta = effectiveDelegatorMeta(bundle);
+        delegation = {
+          id: bundle.delegator.id,
+          name: meta.name,
+          nameZh: meta.nameZh,
+          icon: meta.icon,
+        };
+      }
+      rows.push({ address: v.address, choice: v.choice, amount, delegation });
     }
     rows.sort((a, b) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0));
     return rows;
@@ -718,6 +723,16 @@ export default function VotingSection({ voting }: { voting: VotingState }) {
                     <span className="w-6 shrink-0 text-xs text-[color:var(--oa-ink-tertiary)] tabular-nums">
                       {index + 1}
                     </span>
+                    {row.delegation.icon && (
+                      <span className="h-8 w-8 rounded-full overflow-hidden shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={row.delegation.icon}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      </span>
+                    )}
                     <span className="min-w-0">
                       <span className="text-sm font-medium truncate flex items-center gap-1">
                         {locale === 'zh' && row.delegation.nameZh

@@ -67,6 +67,13 @@ export const proposalBundleSchema = z.object({
   signature: z.string().min(1).max(4096),
 });
 
+/** Base64 data-URI icon — same 5 MB source cap as markdown images
+ *  (base64 inflates ~4/3, plus the data: header). */
+const delegatorIconSchema = z
+  .string()
+  .regex(/^data:image\//)
+  .max(7_200_000);
+
 export const delegatorBundleSchema = z.object({
   delegator: z.object({
     id: z.string().regex(/^[0-9a-f]{64}$/),
@@ -75,11 +82,26 @@ export const delegatorBundleSchema = z.object({
     nameZh: z.string().trim().min(1).max(120).optional(),
     description: z.string().min(1).max(20_000_000),
     descriptionZh: z.string().min(1).max(20_000_000).optional(),
+    icon: delegatorIconSchema.optional(),
     delegator: z.string().trim().min(1),
     createdAtBlock: z.number().int().nonnegative(),
     createdAt: z.string().refine((s) => Number.isFinite(Date.parse(s))),
   }),
   signature: z.string().min(1).max(4096),
+});
+
+export const delegatorUpdateSchema = z.object({
+  daoId: z.string().min(1),
+  delegatorId: z.string().regex(/^[0-9a-f]{64}$/),
+  name: z.string().trim().min(1).max(120),
+  nameZh: z.string().trim().min(1).max(120).optional(),
+  description: z.string().min(1).max(20_000_000),
+  descriptionZh: z.string().min(1).max(20_000_000).optional(),
+  icon: delegatorIconSchema.optional(),
+  height: z.number().int().nonnegative(),
+  seq: z.number().int().nonnegative().max(1_000_000),
+  signature: z.string().min(1).max(4096),
+  updatedAt: z.string().refine((s) => Number.isFinite(Date.parse(s))),
 });
 
 export const delegationActionSchema = z.object({

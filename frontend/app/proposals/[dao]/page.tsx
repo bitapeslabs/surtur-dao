@@ -83,7 +83,7 @@ function DelegationRow({
   const name = locale === 'zh' && meta.nameZh ? meta.nameZh : meta.name;
   return (
     <Link
-      href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`)}
+      href={p(`/delegations/${dao.id}/${bundle.delegator.id}`)}
       className="oa-row px-5 py-4 flex items-center justify-between gap-3 cursor-pointer"
     >
       <div className="min-w-0 flex items-center gap-3">
@@ -170,7 +170,7 @@ function ProposalRow({
                 e.preventDefault();
                 e.stopPropagation();
                 window.location.assign(
-                  p(`/proposals/${dao.id}/delegations/${proposerDelegation.id}`),
+                  p(`/delegations/${dao.id}/${proposerDelegation.id}`),
                 );
               }}
               onKeyDown={(e) => {
@@ -178,7 +178,7 @@ function ProposalRow({
                   e.preventDefault();
                   e.stopPropagation();
                   window.location.assign(
-                    p(`/proposals/${dao.id}/delegations/${proposerDelegation.id}`),
+                    p(`/delegations/${dao.id}/${proposerDelegation.id}`),
                   );
                 }
               }}
@@ -282,7 +282,7 @@ export default function DaoProposalsPage() {
       router.push(
         p(
           view === 'delegations'
-            ? `/proposals/${dao.id}/delegations/new`
+            ? `/delegations/${dao.id}/new`
             : `/proposals/${dao.id}/new`,
         ),
       );

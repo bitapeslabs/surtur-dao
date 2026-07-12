@@ -225,7 +225,7 @@ export default function DelegationDetailPage() {
             </div>
             {isSigner && (
               <Link
-                href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}/edit`)}
+                href={p(`/delegations/${dao.id}/${bundle.delegator.id}/edit`)}
                 className="oa-btn-secondary !px-4 !py-2 shrink-0"
               >
                 {t('dlg.edit')}

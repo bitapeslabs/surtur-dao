@@ -221,7 +221,7 @@ export default function Header() {
                   <div className="my-1 h-px bg-[color:var(--oa-border)]" />
                   {myDelegation && (
                     <Link
-                      href={p(`/proposals/${myDelegation.daoId}/delegations/${myDelegation.id}`)}
+                      href={p(`/delegations/${myDelegation.daoId}/${myDelegation.id}`)}
                       className="oa-row w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-[color:var(--oa-ink)]"
                       onClick={() => setShowAccount(false)}
                     >

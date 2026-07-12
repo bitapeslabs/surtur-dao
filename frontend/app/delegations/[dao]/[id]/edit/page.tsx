@@ -119,7 +119,7 @@ export default function EditDelegationPage() {
       });
       await queryClient.invalidateQueries({ queryKey: ['nodes', 'delegator', bundle.delegator.id] });
       await queryClient.invalidateQueries({ queryKey: ['nodes', 'delegators', dao.id] });
-      router.push(p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`));
+      router.push(p(`/delegations/${dao.id}/${bundle.delegator.id}`));
     } catch (e) {
       if (
         e instanceof SubfrostConnectError &&
@@ -156,7 +156,7 @@ export default function EditDelegationPage() {
     <main className="max-w-3xl mx-auto px-5 py-10 flex flex-col gap-6">
       <div>
         <Link
-          href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`)}
+          href={p(`/delegations/${dao.id}/${bundle.delegator.id}`)}
           className="oa-btn-ghost !px-2 -ml-2 mb-3"
         >
           <ArrowLeft size={15} />
@@ -234,7 +234,7 @@ export default function EditDelegationPage() {
 
       <div className="flex items-center justify-end gap-2 pb-6">
         <Link
-          href={p(`/proposals/${dao.id}/delegations/${bundle.delegator.id}`)}
+          href={p(`/delegations/${dao.id}/${bundle.delegator.id}`)}
           className="oa-btn-secondary"
         >
           {t('create.cancel')}

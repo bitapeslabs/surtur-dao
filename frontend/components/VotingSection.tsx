@@ -715,7 +715,7 @@ export default function VotingSection({ voting }: { voting: VotingState }) {
                 // delegation badge), links to the delegation page.
                 <Link
                   key={row.address}
-                  href={pHref(`/proposals/${dao?.id}/delegations/${row.delegation.id}`)}
+                  href={pHref(`/delegations/${dao?.id}/${row.delegation.id}`)}
                   className="oa-row group px-5 py-3.5 flex items-center justify-between gap-3 border-l-2"
                   style={{ borderLeftColor: CHOICE_META[row.choice].color }}
                 >

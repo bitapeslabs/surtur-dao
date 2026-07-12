@@ -214,7 +214,7 @@ export default function ProposalDetailPage() {
               {t('prop.proposer')}{' '}
               {proposerDelegation ? (
                 <Link
-                  href={p(`/proposals/${dao.id}/delegations/${proposerDelegation.id}`)}
+                  href={p(`/delegations/${dao.id}/${proposerDelegation.id}`)}
                   className="oa-hoverable text-[color:var(--oa-ink)] hover:underline inline-flex items-center gap-1.5 align-middle"
                 >
                   {proposerDelegation.icon && (

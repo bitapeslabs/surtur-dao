@@ -141,6 +141,10 @@ export const MESSAGES = {
     en: 'Your voting power is delegated here.',
     zh: '您的票权已委托于此。',
   },
+  'dlg.ownerCannotJoin': {
+    en: 'Delegation owners cannot join another delegation.',
+    zh: '委托所有者不能加入其他委托。',
+  },
   'dlg.memberElsewhere': {
     en: 'Delegating here moves your voting power from your current delegation.',
     zh: '委托于此将把您的票权从当前委托转移过来。',

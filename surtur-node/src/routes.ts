@@ -454,6 +454,23 @@ router.post('/delegations', async (req: Request, res: Response) => {
       return;
     }
 
+    // A delegation OWNER joining another delegation would silence their
+    // own delegation entirely (owners are the only address that can wield
+    // their members' power, and delegated addresses can't vote) — refuse
+    // the join. Leaves stay allowed so historic state can be cleaned up.
+    if (action.action === 'join') {
+      const ownsDelegation = (await db.listDelegators(action.daoId)).some(
+        (b) => b.delegator.delegator === action.address,
+      );
+      if (ownsDelegation) {
+        res.status(403).json({
+          ok: false,
+          error: 'delegation owners cannot join another delegation',
+        });
+        return;
+      }
+    }
+
     // The nonce height must be ~the live tip — so effective-state
     // history can't be rewritten by backdated joins/leaves.
     const tip = await fetchEspoTip(dao.espoUrl);

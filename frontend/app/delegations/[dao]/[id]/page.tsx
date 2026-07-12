@@ -60,6 +60,14 @@ export default function DelegationDetailPage() {
   });
   const bundle = delegatorQuery.data ?? null;
 
+  const delegatorsQuery = useQuery({
+    queryKey: ['nodes', 'delegators', dao?.id],
+    queryFn: () => getDaoStore().listDelegators(dao!.id),
+    enabled: !!dao,
+    staleTime: Infinity,
+    placeholderData: (prev) => prev,
+  });
+
   const actionsQuery = useQuery({
     queryKey: ['nodes', 'delegation-actions', dao?.id],
     queryFn: () => getDaoStore().listDelegationActions(dao!.id),
@@ -121,6 +129,11 @@ export default function DelegationDetailPage() {
   const myDelegation = myAddress ? (state.get(myAddress) ?? null) : null;
   const isMemberHere = bundle !== null && myDelegation === bundle.delegator.id;
   const isSigner = bundle !== null && myAddress === bundle.delegator.delegator;
+  // Owners of ANY delegation in this DAO can't join others (joining
+  // would silence their own delegation — nodes enforce the same rule).
+  const ownsAnyDelegation =
+    !!myAddress &&
+    (delegatorsQuery.data ?? []).some((b) => b.delegator.delegator === myAddress);
 
   const act = async (kind: 'join' | 'leave') => {
     if (!session || !bundle || submitting) return;
@@ -370,6 +383,10 @@ export default function DelegationDetailPage() {
                 {submitting ? t('dlg.signing') : t('dlg.leave')}
               </button>
             </>
+          ) : ownsAnyDelegation ? (
+            <p className="text-sm text-[color:var(--oa-ink-tertiary)] text-center">
+              {t('dlg.ownerCannotJoin')}
+            </p>
           ) : (
             <>
               {myDelegation !== null && (

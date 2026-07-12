@@ -228,6 +228,26 @@ export function resolveDelegationState(
   return state;
 }
 
+/**
+ * Member addresses joined to `delegatorId` at `evalHeight` (excluding
+ * the signer). Used for the delegated-power proposal threshold: a
+ * delegation owner proposes with own + members' balances, membership
+ * and balances both pinned at the proposal's start block.
+ */
+export function delegationMembersAt(
+  signer: string,
+  delegatorId: string,
+  actions: DelegationActionWire[],
+  evalHeight: number,
+): string[] {
+  const state = resolveDelegationState(actions, evalHeight);
+  const members: string[] = [];
+  for (const [address, id] of state) {
+    if (id === delegatorId && address !== signer) members.push(address);
+  }
+  return members;
+}
+
 // ---- delegation-aware tally ---------------------------------------------
 
 export interface DelegatedVote {

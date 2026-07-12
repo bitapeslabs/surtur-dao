@@ -124,12 +124,16 @@ function ProposalRow({
   proposal,
   height,
   voteCount,
+  proposerDelegation,
 }: {
   dao: DaoDefinition;
   proposal: Proposal;
   height: number | null;
   /** Highest total any node reports; null while loading. */
   voteCount: number | null;
+  /** Set when the proposer is a delegation's signer — the row shows the
+   *  delegation identity instead of the raw address. */
+  proposerDelegation?: { id: string; name: string; nameZh?: string; icon?: string };
 }) {
   const { t, p, locale } = useI18n();
   const open = proposal.status === 'open';
@@ -157,6 +161,43 @@ function ProposalRow({
         </div>
         <div className="mt-1 text-xs text-[color:var(--oa-ink-secondary)] truncate">
           {t('prop.proposer')}{' '}
+          {proposerDelegation ? (
+            <span
+              role="link"
+              tabIndex={0}
+              className="oa-hoverable text-[color:var(--oa-ink)] hover:underline inline-flex items-center gap-1 align-middle"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.location.assign(
+                  p(`/proposals/${dao.id}/delegations/${proposerDelegation.id}`),
+                );
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  window.location.assign(
+                    p(`/proposals/${dao.id}/delegations/${proposerDelegation.id}`),
+                  );
+                }
+              }}
+            >
+              {proposerDelegation.icon && (
+                <span className="h-4 w-4 rounded-full overflow-hidden shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={proposerDelegation.icon}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                </span>
+              )}
+              {locale === 'zh' && proposerDelegation.nameZh
+                ? proposerDelegation.nameZh
+                : proposerDelegation.name}
+            </span>
+          ) : (
           <span
             role="link"
             tabIndex={0}
@@ -176,6 +217,7 @@ function ProposalRow({
           >
             {shortAddress(proposal.author)}
           </span>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-3 shrink-0">
@@ -280,8 +322,10 @@ export default function DaoProposalsPage() {
   // nodes, holder balances from espo for the FIRE totals.
   const delegatorsQuery = useQuery({
     queryKey: ['nodes', 'delegators', dao?.id],
+    // Needed in BOTH views: the proposals list renders delegation-owned
+    // proposals under the delegation's identity.
     queryFn: () => getDaoStore().listDelegators(dao!.id),
-    enabled: !!dao && view === 'delegations',
+    enabled: !!dao,
     staleTime: Infinity,
     placeholderData: (prev) => prev,
   });
@@ -328,6 +372,24 @@ export default function DaoProposalsPage() {
       })
       .sort((a, b) => (b.power > a.power ? 1 : b.power < a.power ? -1 : 0));
   }, [delegatorsQuery.data, delegationActionsQuery.data, delegationHoldersQuery.data, height]);
+
+  // signer address → delegation display identity (latest update wins).
+  const delegationBySigner = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; nameZh?: string; icon?: string }
+    >();
+    for (const bundle of delegatorsQuery.data ?? []) {
+      const meta = effectiveDelegatorMeta(bundle);
+      map.set(bundle.delegator.delegator, {
+        id: bundle.delegator.id,
+        name: meta.name,
+        nameZh: meta.nameZh,
+        icon: meta.icon,
+      });
+    }
+    return map;
+  }, [delegatorsQuery.data]);
 
   // Per-proposal vote totals (highest any node reports), refreshed with
   // the same block-change invalidation as the list itself.
@@ -527,6 +589,7 @@ export default function DaoProposalsPage() {
                 proposal={p}
                 height={height}
                 voteCount={voteCounts === null ? null : (voteCounts[p.id] ?? 0)}
+                proposerDelegation={delegationBySigner.get(p.author)}
               />
             ))}
 
@@ -600,6 +663,7 @@ export default function DaoProposalsPage() {
                 proposal={p}
                 height={height}
                 voteCount={voteCounts === null ? null : (voteCounts[p.id] ?? 0)}
+                proposerDelegation={delegationBySigner.get(p.author)}
               />
               ))}
             </div>

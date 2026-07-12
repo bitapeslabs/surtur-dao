@@ -11,7 +11,13 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { resolveThreshold, thresholdPower, type ThresholdSchedule } from '@surtur/shared';
+import {
+  delegationMembersAt,
+  resolveThreshold,
+  thresholdPower,
+  type ThresholdSchedule,
+} from '@surtur/shared';
+import { getDaoStore } from '@/lib/dao/store';
 import type { DaoDefinition } from '@/daos';
 import { useVendorWallet } from '@/context/VendorWalletContext';
 import { useEspoHeight } from '@/hooks/useEspoHeight';
@@ -46,9 +52,40 @@ export function useProposerEligibility(
     ? resolveThreshold(activeSchedule, tip ?? Number.MAX_SAFE_INTEGER)
     : 0;
 
+  // A delegation owner proposes with delegated power — resolve their
+  // members at the tip and count those balances toward the share.
+  const delegatorsQuery = useQuery({
+    queryKey: ['nodes', 'delegators', dao?.id],
+    queryFn: () => getDaoStore().listDelegators(dao!.id),
+    enabled: !!dao && !!address && requiredPct > 0,
+    staleTime: Infinity,
+    placeholderData: (prev) => prev,
+  });
+  const actionsQuery = useQuery({
+    queryKey: ['nodes', 'delegation-actions', dao?.id],
+    queryFn: () => getDaoStore().listDelegationActions(dao!.id),
+    enabled: !!dao && !!address && requiredPct > 0,
+    staleTime: 30_000,
+  });
+  const ownedDelegatorId =
+    (delegatorsQuery.data ?? []).find((b) => b.delegator.delegator === address)?.delegator.id ??
+    null;
+  const members =
+    address && ownedDelegatorId && tip !== null
+      ? delegationMembersAt(address, ownedDelegatorId, actionsQuery.data ?? [], tip)
+      : [];
+
   const share = useQuery({
-    queryKey: ['espo', dao?.espoNetwork, 'proposer-share', address, tip, requiredPct],
-    queryFn: () => fetchProposerShare(dao!, address!),
+    queryKey: [
+      'espo',
+      dao?.espoNetwork,
+      'proposer-share',
+      address,
+      tip,
+      requiredPct,
+      members.join(','),
+    ],
+    queryFn: () => fetchProposerShare(dao!, address!, members),
     enabled: !!dao && !!address && tip !== null && requiredPct > 0,
     staleTime: Infinity,
     placeholderData: (prev) => prev,

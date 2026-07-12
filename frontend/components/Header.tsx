@@ -13,6 +13,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Check, ChevronDown, Copy, Loader2, Settings2, Unplug, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import { effectiveDelegatorMeta } from '@surtur/shared';
+import { ScrollText } from 'lucide-react';
+import { DAOS } from '@/daos';
+import { getDaoStore } from '@/lib/dao/store';
 import { useVendorWallet } from '@/context/VendorWalletContext';
 import { useI18n } from '@/hooks/useI18n';
 import { stripLocale, LOCALE_PREFIX } from '@/i18n';
@@ -62,7 +67,7 @@ function TranslateToggle() {
 
 export default function Header() {
   const pathname = usePathname();
-  const { t, p } = useI18n();
+  const { locale, t, p } = useI18n();
   const {
     hydrated,
     session,
@@ -73,6 +78,33 @@ export default function Header() {
     connecting,
     connectError,
   } = useVendorWallet();
+
+  // When the connected wallet owns a delegation (in any enabled DAO),
+  // the account button wears the delegation's identity.
+  const enabledDaoIds = DAOS.filter((d) => d.enabled).map((d) => d.id);
+  const myDelegationQuery = useQuery({
+    queryKey: ['nodes', 'my-delegation', session?.account.address, enabledDaoIds.join(',')],
+    queryFn: async () => {
+      for (const daoId of enabledDaoIds) {
+        const bundles = await getDaoStore().listDelegators(daoId);
+        const mine = bundles.find((b) => b.delegator.delegator === session!.account.address);
+        if (mine) {
+          const meta = effectiveDelegatorMeta(mine);
+          return {
+            daoId,
+            id: mine.delegator.id,
+            name: meta.name,
+            nameZh: meta.nameZh,
+            icon: meta.icon,
+          };
+        }
+      }
+      return null;
+    },
+    enabled: !!session,
+    staleTime: 60_000,
+  });
+  const myDelegation = myDelegationQuery.data ?? null;
   const [showSettings, setShowSettings] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -140,7 +172,27 @@ export default function Header() {
                 onClick={() => setShowAccount((v) => !v)}
                 title={session.account.address}
               >
-                {shortAddress(session.account.address)}
+                {myDelegation ? (
+                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                    {myDelegation.icon && (
+                      <span className="h-5 w-5 rounded-full overflow-hidden shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={myDelegation.icon}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      </span>
+                    )}
+                    <span className="truncate max-w-36">
+                      {locale === 'zh' && myDelegation.nameZh
+                        ? myDelegation.nameZh
+                        : myDelegation.name}
+                    </span>
+                  </span>
+                ) : (
+                  shortAddress(session.account.address)
+                )}
                 <ChevronDown
                   size={13}
                   className={`transition-transform ${showAccount ? 'rotate-180' : ''}`}
@@ -167,6 +219,16 @@ export default function Header() {
                     </button>
                   </div>
                   <div className="my-1 h-px bg-[color:var(--oa-border)]" />
+                  {myDelegation && (
+                    <Link
+                      href={p(`/proposals/${myDelegation.daoId}/delegations/${myDelegation.id}`)}
+                      className="oa-row w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-[color:var(--oa-ink)]"
+                      onClick={() => setShowAccount(false)}
+                    >
+                      <ScrollText size={14} />
+                      {t('header.viewDelegation')}
+                    </Link>
+                  )}
                   <Link
                     href={p('/portfolio')}
                     className="oa-row w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-[color:var(--oa-ink)]"

@@ -33,6 +33,7 @@ import MarkdownEditor from '@/components/MarkdownEditor';
 import ProposalStatusPill from '@/components/ProposalStatusPill';
 import Skeleton from '@/components/Skeleton';
 import TokenIcon from '@/components/TokenIcon';
+import { effectiveDelegatorMeta } from '@surtur/shared';
 import ResolutionSection from '@/components/ResolutionSection';
 import VotingSection, { VoteButtons, useVoting } from '@/components/VotingSection';
 
@@ -72,6 +73,24 @@ export default function ProposalDetailPage() {
     [queryClient, proposalKey.join('|')],
   );
   const voting = useVoting(dao, proposal, onProposalChanged);
+
+  // Delegation-owned proposals show the delegation identity as proposer.
+  const delegatorsQuery = useQuery({
+    queryKey: ['nodes', 'delegators', dao?.id],
+    queryFn: () => getDaoStore().listDelegators(dao!.id),
+    enabled: !!dao,
+    staleTime: Infinity,
+    placeholderData: (prev) => prev,
+  });
+  const proposerDelegation = useMemo(() => {
+    if (!proposal) return null;
+    const bundle = (delegatorsQuery.data ?? []).find(
+      (b) => b.delegator.delegator === proposal.author,
+    );
+    if (!bundle) return null;
+    const meta = effectiveDelegatorMeta(bundle);
+    return { id: bundle.delegator.id, name: meta.name, nameZh: meta.nameZh, icon: meta.icon };
+  }, [delegatorsQuery.data, proposal]);
 
   // Tab title: "Surtur - <proposal title>" (localized), restored to plain
   // "Surtur" when leaving the page (client navigation keeps document.title).
@@ -193,6 +212,26 @@ export default function ProposalDetailPage() {
           <div className="mt-2 flex flex-col gap-0.5 text-sm text-[color:var(--oa-ink-secondary)]">
             <span>
               {t('prop.proposer')}{' '}
+              {proposerDelegation ? (
+                <Link
+                  href={p(`/proposals/${dao.id}/delegations/${proposerDelegation.id}`)}
+                  className="oa-hoverable text-[color:var(--oa-ink)] hover:underline inline-flex items-center gap-1.5 align-middle"
+                >
+                  {proposerDelegation.icon && (
+                    <span className="h-4 w-4 rounded-full overflow-hidden shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={proposerDelegation.icon}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    </span>
+                  )}
+                  {locale === 'zh' && proposerDelegation.nameZh
+                    ? proposerDelegation.nameZh
+                    : proposerDelegation.name}
+                </Link>
+              ) : (
               <a
                 href={explorerAddressUrl(proposal.author)}
                 target="_blank"
@@ -201,6 +240,7 @@ export default function ProposalDetailPage() {
               >
                 {shortAddress(proposal.author)}
               </a>
+              )}
             </span>
             {proposal.status === 'open' && (
               <span className="tabular-nums">

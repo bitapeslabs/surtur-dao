@@ -17,6 +17,7 @@ import { getDaoStore } from '@/lib/dao/store';
 import { useQuery } from '@tanstack/react-query';
 import { SubfrostConnectError } from 'subfrost-connect';
 import {
+  delegationMembersAt,
   buildProposalSignMessage,
   computeProposalId,
   resolveThreshold,
@@ -254,8 +255,24 @@ export default function NewProposalPage() {
       const proposalPct = resolveThreshold(dao.proposalThreshold, finalStart);
       if (proposalPct > 0) {
         const { supply, holders } = await fetchSupplyAndHolders(dao);
-        const mine =
-          holders.find((h) => h.address === session.account.address)?.amount ?? 0n;
+        const balancesByAddress = new Map(holders.map((h) => [h.address, h.amount]));
+        let mine = balancesByAddress.get(session.account.address) ?? 0n;
+        // Delegation owners propose with delegated power (members at the
+        // start block — the same rule nodes enforce).
+        const owned = (await getDaoStore().listDelegators(dao.id)).find(
+          (b) => b.delegator.delegator === session.account.address,
+        );
+        if (owned) {
+          const daoActions = await getDaoStore().listDelegationActions(dao.id);
+          for (const member of delegationMembersAt(
+            session.account.address,
+            owned.delegator.id,
+            daoActions,
+            finalStart,
+          )) {
+            mine += balancesByAddress.get(member) ?? 0n;
+          }
+        }
         const sharePct = supply > 0n ? Number((mine * 10_000n) / supply) / 100 : 0;
         if (sharePct < proposalPct) {
           setError(

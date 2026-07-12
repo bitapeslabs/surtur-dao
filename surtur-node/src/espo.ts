@@ -48,12 +48,15 @@ export async function proposerMeetsThreshold(
   dao: OrchestratorDao,
   proposer: string,
   startBlock: number,
+  /** Delegation members whose balances count toward the proposer's
+   *  share (a delegation owner proposes with delegated power). */
+  memberAddresses: string[] = [],
 ): Promise<boolean> {
   // The schedule entry in force AT the start block — later forks never
   // re-judge older proposals.
   const pctg = resolveThreshold(dao.proposalThreshold, startBlock);
   if (pctg <= 0) return true;
-  return shareMeets(dao, proposer, pctg, startBlock);
+  return shareMeets(dao, proposer, pctg, startBlock, memberAddresses);
 }
 
 /**
@@ -70,6 +73,7 @@ async function shareMeets(
   address: string,
   pctg: number,
   atBlock: number,
+  extraAddresses: string[] = [],
 ): Promise<boolean> {
   const run = async (height?: number) => {
     const h = height !== undefined ? { height } : {};
@@ -86,10 +90,20 @@ async function shareMeets(
         method: 'essentials.get_address_balances',
         params: { address, ...h },
       },
+      ...extraAddresses.map((extra, i) => ({
+        jsonrpc: '2.0' as const,
+        id: `extra-${i}`,
+        method: 'essentials.get_address_balances',
+        params: { address: extra, ...h },
+      })),
     ]);
+    let held = votingBalanceOf(dao, results.get('balance'));
+    extraAddresses.forEach((_, i) => {
+      held += votingBalanceOf(dao, results.get(`extra-${i}`));
+    });
     return {
       supply: BigInt(String(results.get('supply')?.supply ?? 0)),
-      held: votingBalanceOf(dao, results.get('balance')),
+      held,
     };
   };
 

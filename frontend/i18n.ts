@@ -152,6 +152,7 @@ export const MESSAGES = {
   'dlg.iconHint': { en: 'Optional — up to 5 MB.', zh: '可选 — 最大 5 MB。' },
   'dlg.iconRemove': { en: 'Remove', zh: '移除' },
   'dlg.edit': { en: 'Edit', zh: '编辑' },
+  'header.viewDelegation': { en: 'View delegation', zh: '查看委托' },
   'dlg.saveChanges': { en: 'Save changes', zh: '保存更改' },
   'dlg.saving': { en: 'Saving…', zh: '保存中…' },
   'dlg.createdAtBlock': { en: 'Created at block', zh: '创建区块' },

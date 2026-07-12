@@ -278,10 +278,15 @@ export async function fetchEspoHeight(network: string = 'mainnet'): Promise<numb
   return parseHeight(results.get('height'));
 }
 
-/** Supply + one address's voting-token balance in ONE batched call. */
+/**
+ * Supply + an address's voting-token share in ONE batched call. Member
+ * addresses (a delegation owner's joined members) count toward `held` —
+ * delegation owners propose with delegated power.
+ */
 export async function fetchProposerShare(
   dao: DaoDefinition,
   address: string,
+  memberAddresses: string[] = [],
 ): Promise<{ supply: bigint; held: bigint }> {
   const results = await espoBatch(dao.espoNetwork, [
     supplyRequest(dao),
@@ -291,10 +296,22 @@ export async function fetchProposerShare(
       method: 'essentials.get_address_balances',
       params: { address },
     },
+    ...memberAddresses.map((member, i) => ({
+      jsonrpc: '2.0' as const,
+      id: `member-${i}`,
+      method: 'essentials.get_address_balances',
+      params: { address: member },
+    })),
   ]);
+  let memberHeld = 0n;
+  memberAddresses.forEach((_, i) => {
+    memberHeld += BigInt(
+      String(results.get(`member-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
+    );
+  });
   return {
     supply: parseSupply(results.get('supply')),
-    held: BigInt(
+    held: memberHeld + BigInt(
       String(results.get('holder-balance')?.balances?.[dao.votingToken.alkaneId] ?? 0),
     ),
   };

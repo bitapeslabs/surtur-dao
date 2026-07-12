@@ -14,6 +14,7 @@
 import { Router, type Request, type Response } from 'express';
 import {
   delegationActionSchema,
+  delegationMembersAt,
   delegatorBundleSchema,
   delegatorUpdateSchema,
   verifyDelegatorUpdate,
@@ -135,7 +136,24 @@ router.post('/proposals', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!(await proposerMeetsThreshold(dao, proposal.proposer, proposal.startBlock))) {
+    // A delegation owner proposes with delegated power: own balance plus
+    // every member's balance, membership + balances pinned at startBlock.
+    let proposerMembers: string[] = [];
+    const ownedDelegator = (await db.listDelegators(proposal.daoId)).find(
+      (b) => b.delegator.delegator === proposal.proposer,
+    );
+    if (ownedDelegator) {
+      const daoActions = await db.listDelegationActions(proposal.daoId);
+      proposerMembers = delegationMembersAt(
+        proposal.proposer,
+        ownedDelegator.delegator.id,
+        daoActions,
+        proposal.startBlock,
+      );
+    }
+    if (
+      !(await proposerMeetsThreshold(dao, proposal.proposer, proposal.startBlock, proposerMembers))
+    ) {
       res.status(403).json({ ok: false, error: 'proposer below proposal threshold' });
       return;
     }

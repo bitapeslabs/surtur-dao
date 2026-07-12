@@ -19,6 +19,7 @@ import {
   verifyProposalBundle,
   verifyVoteWire,
   compareActions,
+  delegationMembersAt,
   verifyDelegatorBundle,
   verifyDelegationAction,
   verifyDelegatorUpdate,
@@ -265,6 +266,37 @@ export class NodeDaoStore implements DaoStore {
       byNetwork.set(dao.espoNetwork, list);
     }
 
+    // Delegation owners propose with delegated power — resolve each
+    // proposer's members at that proposal's start block (per-dao context
+    // fetched once) so their balances ride in the same espo batch.
+    const membersByRow = new Map<string, string[]>();
+    const daoIds = [...new Set(needCheck.map((row) => row.proposal.daoId))];
+    for (const daoId of daoIds) {
+      const rows = needCheck.filter((row) => row.proposal.daoId === daoId);
+      const proposers = new Set(rows.map((row) => row.proposal.proposer));
+      try {
+        const delegators = await this.listDelegators(daoId);
+        const owned = delegators.filter((b) => proposers.has(b.delegator.delegator));
+        if (owned.length === 0) continue;
+        const actions = await this.listDelegationActions(daoId);
+        for (const row of rows) {
+          const mine = owned.find((b) => b.delegator.delegator === row.proposal.proposer);
+          if (!mine) continue;
+          membersByRow.set(
+            row.proposal.id,
+            delegationMembersAt(
+              row.proposal.proposer,
+              mine.delegator.id,
+              actions,
+              row.proposal.startBlock,
+            ),
+          );
+        }
+      } catch {
+        /* nodes unreachable for delegation context — own balance only */
+      }
+    }
+
     const valid: NodeProposal[] = [];
     for (const [network, list] of byNetwork) {
       try {
@@ -283,6 +315,12 @@ export class NodeDaoStore implements DaoStore {
               method: 'essentials.get_address_balances',
               params: { address: row.proposal.proposer, height: row.proposal.startBlock },
             },
+            ...(membersByRow.get(row.proposal.id) ?? []).map((member, j) => ({
+              jsonrpc: '2.0',
+              id: `m-${i}-${j}`,
+              method: 'essentials.get_address_balances',
+              params: { address: member, height: row.proposal.startBlock },
+            })),
           ];
         });
         const res = await fetch(getEspoUrl(network), {
@@ -299,9 +337,14 @@ export class NodeDaoStore implements DaoStore {
         list.forEach((row, i) => {
           const dao = this.getDao(row.proposal.daoId)!;
           const supply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
-          const held = BigInt(
+          let held = BigInt(
             String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
           );
+          (membersByRow.get(row.proposal.id) ?? []).forEach((_, j) => {
+            held += BigInt(
+              String(byId.get(`m-${i}-${j}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
+            );
+          });
           if (supply <= 0n) {
             // Espo's versioned view isn't materialized for that block yet
             // (exact-tip race) — trust the node for now, judge next fetch.

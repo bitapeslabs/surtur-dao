@@ -11,5 +11,6 @@
     "build": "pnpm -r build",
     "node:dev": "pnpm --filter @surtur/node dev",
     "typecheck": "pnpm -r typecheck"
-  }
+  },
+  "packageManager": "pnpm@10.0.0"
 }

@@ -17,4 +17,4 @@ export const SUBFROST_ORIGIN = 'https://app.subfrost.io';
  * (its `/request/wallets`, `/request/sign`, `/request/signmessage` popups).
  * A bare origin, like SUBFROST_ORIGIN.
  */
-export const PIZZA_ORIGIN = 'https://pizza.fun';
+export const PIZZA_ORIGIN = process.env.NEXT_PUBLIC_PIZZA_ORIGIN?.trim() || 'https://pizza.fun';

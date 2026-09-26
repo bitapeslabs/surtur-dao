@@ -4,7 +4,7 @@
  * these definitions. Add a DAO by appending to DAOS.
  */
 
-import type { ThresholdSchedule } from '@surtur/shared';
+import type { NonCirculating, ThresholdSchedule } from '@surtur/shared';
 
 export interface DaoToken {
   /** Alkane id, "block:tx". */
@@ -68,6 +68,13 @@ export interface DaoDefinition {
   delegatorThreshold: ThresholdSchedule;
   /** Network whose Espo instance serves this DAO's token data. */
   espoNetwork: string;
+  /**
+   * Holders of the voting token that are NOT circulating: their balances
+   * come off the supply every threshold is measured against, and such an
+   * ADDRESS has no governance power. Enforced by surtur nodes AND
+   * re-checked client-side (shared `circulating.ts`).
+   */
+  nonCirculating?: NonCirculating;
 }
 
 export const DAOS: DaoDefinition[] = [
@@ -97,25 +104,30 @@ export const DAOS: DaoDefinition[] = [
     espoNetwork: 'mainnet',
   },
   {
-    // Example disabled DAO — listed on /proposals but greyed out and not
-    // enterable; kept here to exercise the disabled state.
     id: 'pizza',
     name: 'Pizza.fun Foundation',
-    description: "Governs pizza.fun's CHEESE and FIRE reserves",
-    descriptionZh: '管理 pizza.fun 的 CHEESE 和 FIRE 储备',
+    description: "Governs pizza.fun's reserves — SLICE holders vote.",
+    descriptionZh: '管理 pizza.fun 的储备 — 由 SLICE 持有者投票。',
     iconUrl: 'https://app.subfrost.io/tokens/cheese-logo.png',
-    enabled: false,
-    treasuryToken: { alkaneId: '32:0', symbol: 'frBTC' },
-    treasuryAddress: '',
-    votingToken: { alkaneId: '32:0', symbol: 'frBTC' },
-    resolverSigner: '',
-    proposalThreshold: [
-      { height: 0, pctg: 0 },
-      { height: 957018, pctg: 0.5 },
-    ],
+    enabled: true,
+    // TODO(pizza.fun): confirm the treasury token / address and the resolver —
+    // the team wallet below stands in for both until the operator names them.
+    treasuryToken: { alkaneId: '4:8888', symbol: 'SLICE' },
+    treasuryAddress: 'bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer',
+    // SLICE (pizza-data 4:47's `slice`), the voting token.
+    votingToken: { alkaneId: '4:8888', symbol: 'SLICE' },
+    resolverSigner: 'bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer',
+    proposalThreshold: [{ height: 0, pctg: 0.5 }],
     votePassThreshold: [{ height: 0, pctg: 40 }],
     delegatorThreshold: [{ height: 0, pctg: 0.5 }],
     espoNetwork: 'mainnet',
+    // Every SLICE counts as circulating EXCEPT what sits in pizza.fun's own
+    // contracts — the treasury (4:53), the admin contract (4:54), the TORTILLA
+    // vault (4:55), the wTACO vault (4:56) — and the team wallet.
+    nonCirculating: {
+      alkanes: ['4:53', '4:54', '4:55', '4:56'],
+      addresses: ['bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer'],
+    },
   },
 ];
 

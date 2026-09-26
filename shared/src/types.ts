@@ -115,6 +115,19 @@ export function thresholdPower(supply: bigint, pctg: number): bigint {
   return (supply * BigInt(Math.round(pctg * 100))) / 10_000n;
 }
 
+/**
+ * Holders of the voting token that are NOT part of the circulating supply
+ * a DAO's thresholds are measured against: contracts (by alkane id — a
+ * vault, a treasury, an admin contract) and addresses (a team wallet).
+ * Their holdings are subtracted from espo's supply at every read (pinned
+ * to the same height), and an excluded ADDRESS has no governance power:
+ * it cannot propose, delegate or vote.
+ */
+export interface NonCirculating {
+  alkanes: string[];
+  addresses: string[];
+}
+
 export interface OrchestratorDao {
   id: string;
   name: string;
@@ -123,6 +136,8 @@ export interface OrchestratorDao {
   treasuryAddress: string;
   votingToken: { alkaneId: string; symbol: string };
   resolverSigner: string;
+  /** Holders whose voting token is not circulating (see `NonCirculating`). */
+  nonCirculating?: NonCirculating;
   /** Fork-height schedule for the create-proposal threshold. */
   proposalThreshold: ThresholdSchedule;
   /** Fork-height schedule for the vote-pass threshold. */

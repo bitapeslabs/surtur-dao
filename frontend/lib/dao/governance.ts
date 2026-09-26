@@ -1,3 +1,4 @@
+import { isNonCirculatingAddress, nonCirculatingRequests, subtractNonCirculating } from '@surtur/shared';
 /**
  * Governance-token reads from Espo (essentials module + root methods, espo
  * v3.0.0-rc3 API), parameterized by DAO — each DaoDefinition names its
@@ -95,11 +96,18 @@ function parseSupply(result: any): bigint {
   return BigInt(String(result?.supply ?? 0));
 }
 
-function parseHolders(result: any): TokenHolder[] {
+function parseHolders(result: any, dao?: DaoDefinition): TokenHolder[] {
   const items: any[] = Array.isArray(result?.items) ? result.items : [];
   return items
     .filter((item) => item?.type === 'address' && typeof item?.address === 'string')
+    // an address the DAO keeps out of circulation has no governance power: not a voter
+    .filter((item) => !dao || !isNonCirculatingAddress(dao, item.address as string))
     .map((item) => ({ address: item.address as string, amount: BigInt(String(item.amount ?? 0)) }));
+}
+
+/** espo's supply less the DAO's non-circulating holdings, read in the same batch (`nonCirculatingRequests`). */
+function circulatingOf(dao: DaoDefinition, results: Map<string, any>, supplyId = 'supply', prefix = 'nc'): bigint {
+  return subtractNonCirculating(dao, parseSupply(results.get(supplyId)), results, prefix);
 }
 
 function parseReserves(dao: DaoDefinition, result: any): bigint {
@@ -207,14 +215,15 @@ export async function fetchGovernanceSnapshot(
   const requests = [
     supplyRequest(dao, atHeight),
     holdersRequest(dao, atHeight),
+    ...nonCirculatingRequests(dao, atHeight),
     ...priceRequests(dao),
   ];
   const hasTreasury = dao.treasuryAddress.length > 0;
   if (hasTreasury) requests.push(reservesRequest(dao, atHeight));
   const results = await espoBatch(dao.espoNetwork, requests, PRICE_IDS);
   return {
-    supply: parseSupply(results.get('supply')),
-    holders: parseHolders(results.get('holders')),
+    supply: circulatingOf(dao, results),
+    holders: parseHolders(results.get('holders'), dao),
     reserves: hasTreasury ? parseReserves(dao, results.get('reserves')) : 0n,
     treasuryUsd: parseTreasuryUsd(dao, results),
   };
@@ -290,6 +299,7 @@ export async function fetchProposerShare(
 ): Promise<{ supply: bigint; held: bigint }> {
   const results = await espoBatch(dao.espoNetwork, [
     supplyRequest(dao),
+    ...nonCirculatingRequests(dao),
     {
       jsonrpc: '2.0',
       id: 'holder-balance',
@@ -310,10 +320,11 @@ export async function fetchProposerShare(
     );
   });
   return {
-    supply: parseSupply(results.get('supply')),
-    held: memberHeld + BigInt(
-      String(results.get('holder-balance')?.balances?.[dao.votingToken.alkaneId] ?? 0),
-    ),
+    supply: circulatingOf(dao, results),
+    // an excluded address holds nothing that counts
+    held: isNonCirculatingAddress(dao, address)
+      ? 0n
+      : memberHeld + BigInt(String(results.get('holder-balance')?.balances?.[dao.votingToken.alkaneId] ?? 0)),
   };
 }
 
@@ -332,12 +343,13 @@ export async function fetchVerdictSnapshots(
   const requests = entries.flatMap((e) => [
     { ...supplyRequest(dao, e.endBlock), id: `supply:${e.proposalId}` },
     { ...holdersRequest(dao, e.endBlock), id: `holders:${e.proposalId}` },
+    ...nonCirculatingRequests(dao, e.endBlock, `nc:${e.proposalId}`),
   ]);
   const results = await espoBatch(dao.espoNetwork, requests);
   for (const e of entries) {
     snapshots.set(e.proposalId, {
-      supply: parseSupply(results.get(`supply:${e.proposalId}`)),
-      holders: parseHolders(results.get(`holders:${e.proposalId}`)),
+      supply: circulatingOf(dao, results, `supply:${e.proposalId}`, `nc:${e.proposalId}`),
+      holders: parseHolders(results.get(`holders:${e.proposalId}`), dao),
     });
   }
   return snapshots;
@@ -353,9 +365,10 @@ export async function fetchSupplyAndHolders(
   const results = await espoBatch(dao.espoNetwork, [
     supplyRequest(dao, atHeight),
     holdersRequest(dao, atHeight),
+    ...nonCirculatingRequests(dao, atHeight),
   ]);
   return {
-    supply: parseSupply(results.get('supply')),
-    holders: parseHolders(results.get('holders')),
+    supply: circulatingOf(dao, results),
+    holders: parseHolders(results.get('holders'), dao),
   };
 }

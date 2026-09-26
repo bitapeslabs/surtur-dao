@@ -3,6 +3,7 @@
  * pass `height` to read the world as of a block.
  */
 
+import { isNonCirculatingAddress, nonCirculatingRequests, subtractNonCirculating } from '@surtur/shared';
 import {
   computeDelegatedTally,
   resolveDelegationState,
@@ -84,6 +85,7 @@ async function shareMeets(
         method: 'essentials.get_circulating_supply',
         params: { alkane: dao.votingToken.alkaneId, ...h },
       },
+      ...nonCirculatingRequests(dao, height),
       {
         jsonrpc: '2.0',
         id: 'balance',
@@ -97,12 +99,13 @@ async function shareMeets(
         params: { address: extra, ...h },
       })),
     ]);
-    let held = votingBalanceOf(dao, results.get('balance'));
-    extraAddresses.forEach((_, i) => {
-      held += votingBalanceOf(dao, results.get(`extra-${i}`));
+    // an address the DAO keeps out of circulation holds nothing that counts
+    let held = isNonCirculatingAddress(dao, address) ? 0n : votingBalanceOf(dao, results.get('balance'));
+    extraAddresses.forEach((extra, i) => {
+      if (!isNonCirculatingAddress(dao, extra)) held += votingBalanceOf(dao, results.get(`extra-${i}`));
     });
     return {
-      supply: BigInt(String(results.get('supply')?.supply ?? 0)),
+      supply: subtractNonCirculating(dao, BigInt(String(results.get('supply')?.supply ?? 0)), results),
       held,
     };
   };
@@ -124,6 +127,8 @@ async function shareMeets(
 
 /** A vote is valid from any address holding ANY amount of the voting token. */
 export async function voterHoldsToken(dao: OrchestratorDao, address: string): Promise<boolean> {
+  // an address the DAO keeps out of circulation cannot vote
+  if (isNonCirculatingAddress(dao, address)) return false;
   const results = await espoBatch(dao.espoUrl, [
     {
       jsonrpc: '2.0',
@@ -185,6 +190,7 @@ export async function computeVerdict(
       method: 'essentials.get_circulating_supply',
       params: { alkane: dao.votingToken.alkaneId, height: endBlock },
     },
+    ...nonCirculatingRequests(dao, endBlock),
     ...addresses.map((address, i) => ({
       jsonrpc: '2.0',
       id: `bal-${i}`,
@@ -193,10 +199,11 @@ export async function computeVerdict(
     })),
   ];
   const results = await espoBatch(dao.espoUrl, requests);
-  const supply = BigInt(String(results.get('supply')?.supply ?? 0));
+  const supply = subtractNonCirculating(dao, BigInt(String(results.get('supply')?.supply ?? 0)), results);
   const balances = new Map<string, bigint>();
   addresses.forEach((address, i) => {
-    balances.set(address, votingBalanceOf(dao, results.get(`bal-${i}`)));
+    // an excluded address's balance carries no power, however it voted
+    balances.set(address, isNonCirculatingAddress(dao, address) ? 0n : votingBalanceOf(dao, results.get(`bal-${i}`)));
   });
 
   const tally = computeDelegatedTally({

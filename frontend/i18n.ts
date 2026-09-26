@@ -179,6 +179,10 @@ export const MESSAGES = {
     en: 'Sign in with the SUBFROST webapp popup.',
     zh: '通过 SUBFROST 网页应用弹窗登录。',
   },
+  'wallet.pizzaHint': {
+    en: 'Sign in with your pizza.fun wallet popup.',
+    zh: '通过 pizza.fun 钱包弹窗登录。',
+  },
   'wallet.mobileHint': {
     en: 'Pair with the SUBFROST mobile app via QR.',
     zh: '通过二维码与 SUBFROST 手机应用配对。',

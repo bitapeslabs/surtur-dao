@@ -33,6 +33,7 @@ export default function ConnectWalletModal() {
     connecting,
     connectError,
     connectPassport,
+    connectPizza,
     connectExtensionWallet,
     adoptMobileSession,
   } = useVendorWallet();
@@ -75,6 +76,15 @@ export default function ConnectWalletModal() {
     setBusyId('passport');
     try {
       await connectPassport();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handlePizza = async () => {
+    setBusyId('pizza');
+    try {
+      await connectPizza();
     } finally {
       setBusyId(null);
     }
@@ -174,6 +184,26 @@ export default function ConnectWalletModal() {
                 </span>
               </span>
               {busyId === 'passport' && <Loader2 size={15} className="animate-spin shrink-0" />}
+            </button>
+
+            {/* pizza.fun wallet — the same passport popup protocol, pizza.fun's origin. */}
+            <button
+              type="button"
+              className="oa-wallet-option w-full px-4 py-3.5 flex items-center gap-3 text-left"
+              onClick={handlePizza}
+              disabled={connecting}
+            >
+              <span className="h-9 w-9 rounded-full overflow-hidden shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/pizza-logo.png" alt="" className="h-full w-full object-cover" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">pizza.fun wallet</span>
+                <span className="block text-xs text-[color:var(--oa-ink-secondary)]">
+                  {t('wallet.pizzaHint')}
+                </span>
+              </span>
+              {busyId === 'pizza' && <Loader2 size={15} className="animate-spin shrink-0" />}
             </button>
 
             {/* Extension wallets */}

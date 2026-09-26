@@ -11,3 +11,10 @@
  * Must be a bare origin (scheme + host, no path or trailing slash).
  */
 export const SUBFROST_ORIGIN = 'https://app.subfrost.io';
+
+/**
+ * Origin of pizza.fun, whose wallet speaks the same passport protocol
+ * (its `/request/wallets`, `/request/sign`, `/request/signmessage` popups).
+ * A bare origin, like SUBFROST_ORIGIN.
+ */
+export const PIZZA_ORIGIN = 'https://pizza.fun';

@@ -38,7 +38,7 @@ import {
   type SignPsbtParams,
 } from 'subfrost-connect';
 import { normalizeNetwork, SUPPORTED_NETWORKS, type VendorNetwork } from '@/lib/config';
-import { SUBFROST_ORIGIN } from '@/config';
+import { PIZZA_ORIGIN, SUBFROST_ORIGIN } from '@/config';
 import { networkForAddress, verifyMessageSimple } from '@surtur/shared';
 import {
   connectExtension,
@@ -52,8 +52,10 @@ import { SubfrostFrtunAdapter } from '@/lib/wallet/mobile';
 
 const ORIGIN_STORAGE_KEY = 'surtur:subfrost-origin';
 const DEFAULT_SUBFROST_ORIGIN = SUBFROST_ORIGIN;
+/** The pizza.fun wallet: the SAME popup protocol as the SUBFROST passport, another origin (overridable for a dev server). */
+const PIZZA_ORIGIN_STORAGE_KEY = 'surtur:pizza-origin';
 
-export type WalletKind = 'passport' | 'extension' | 'mobile';
+export type WalletKind = 'passport' | 'pizza' | 'extension' | 'mobile';
 
 /**
  * Unified session. `account.address` is always the taproot identity the
@@ -62,13 +64,13 @@ export type WalletKind = 'passport' | 'extension' | 'mobile';
  */
 export interface WalletSession {
   kind: WalletKind;
-  /** 'passport' | ExtensionWalletId | 'subfrost-mobile' */
+  /** 'passport' | 'pizza' | ExtensionWalletId | 'subfrost-mobile' */
   walletId: string;
   walletName: string;
   account: { address: string; publicKey?: string };
   /** Reported by the passport; inferred from the address otherwise. */
   network?: string;
-  /** Passport only. */
+  /** Passport and pizza.fun: the origin the popups open against. */
   subfrostOrigin?: string;
 }
 
@@ -144,6 +146,8 @@ interface VendorWalletValue {
   /** Extensions detected in this browser. */
   installedExtensions: ExtensionWalletDef[];
   connectPassport: () => Promise<void>;
+  /** The pizza.fun wallet, through its passport popup (the SUBFROST protocol on pizza.fun's origin). */
+  connectPizza: () => Promise<void>;
   connectExtensionWallet: (id: ExtensionWalletId) => Promise<void>;
   /** Adopt a completed frtun mobile pairing. */
   adoptMobileSession: (adapter: SubfrostFrtunAdapter, addresses: string[]) => void;
@@ -233,6 +237,22 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
       return null; // invalid origin URL while the user is typing
     }
   }, [subfrostOrigin]);
+  const pizzaOrigin = useMemo(() => {
+    try {
+      return localStorage.getItem(PIZZA_ORIGIN_STORAGE_KEY) || PIZZA_ORIGIN;
+    } catch {
+      return PIZZA_ORIGIN;
+    }
+  }, []);
+  const pizzaConnector = useMemo(() => {
+    try {
+      return new SubfrostConnector({ subfrostOrigin: pizzaOrigin });
+    } catch {
+      return null;
+    }
+  }, [pizzaOrigin]);
+  /** the connector of the connected popup wallet (passport or pizza.fun), for its popups */
+  const popupConnector = session?.kind === 'pizza' ? pizzaConnector : connector;
 
   const setSubfrostOrigin = useCallback((value: string) => {
     setOriginState(value);
@@ -276,6 +296,34 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
       setConnecting(false);
     }
   }, [connector, adoptSession]);
+
+  const connectPizza = useCallback(async () => {
+    if (!pizzaConnector) return;
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const s: ConnectSession = await pizzaConnector.connect();
+      adoptSession({
+        kind: 'pizza',
+        walletId: 'pizza',
+        walletName: 'pizza.fun',
+        account: s.account,
+        network: s.network,
+        subfrostOrigin: s.subfrostOrigin,
+      });
+    } catch (e) {
+      if (
+        e instanceof SubfrostConnectError &&
+        (e.code === 'POPUP_CLOSED' || e.code === 'USER_REJECTED')
+      ) {
+        // silent — user changed their mind
+      } else {
+        setConnectError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setConnecting(false);
+    }
+  }, [pizzaConnector, adoptSession]);
 
   const connectExtensionWallet = useCallback(
     async (id: ExtensionWalletId) => {
@@ -334,10 +382,10 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
 
   const openSignPopup = useCallback(
     (endpoint: 'sign' | 'signMessage'): Window | null => {
-      if (session?.kind !== 'passport' || !connector) return null;
-      return connector.openPopup(endpoint);
+      if ((session?.kind !== 'passport' && session?.kind !== 'pizza') || !popupConnector) return null;
+      return popupConnector.openPopup(endpoint);
     },
-    [session?.kind, connector],
+    [session?.kind, popupConnector],
   );
 
   const signMessage = useCallback(
@@ -347,9 +395,11 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
     ): Promise<{ signature: string; address: string; publicKey?: string }> => {
       if (!session) throw new Error('No wallet connected.');
       switch (session.kind) {
-        case 'passport': {
-          if (!connector) throw new Error('SUBFROST connector unavailable.');
-          return connector.signMessage({ message }, { popup: opts?.popup ?? undefined });
+        case 'passport':
+        case 'pizza': {
+          // both speak the passport protocol: raw ECDSA over sha256(message), verified by the nodes against publicKey
+          if (!popupConnector) throw new Error('The wallet popup is unavailable.');
+          return popupConnector.signMessage({ message }, { popup: opts?.popup ?? undefined });
         }
         case 'extension': {
           const signature = await signMessageWithExtension(
@@ -373,16 +423,17 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [session, connector],
+    [session, popupConnector],
   );
 
   const signPsbt = useCallback(
     async (params: SignPsbtParams, opts?: { popup?: Window | null }): Promise<string> => {
       if (!session) throw new Error('No wallet connected.');
       switch (session.kind) {
-        case 'passport': {
-          if (!connector) throw new Error('SUBFROST connector unavailable.');
-          const { signedPsbtBase64 } = await connector.signPsbt(params, {
+        case 'passport':
+        case 'pizza': {
+          if (!popupConnector) throw new Error('The wallet popup is unavailable.');
+          const { signedPsbtBase64 } = await popupConnector.signPsbt(params, {
             popup: opts?.popup ?? undefined,
           });
           return signedPsbtBase64;
@@ -400,7 +451,7 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
           throw new Error('Sending is not supported with SUBFROST Mobile.');
       }
     },
-    [session, connector, network],
+    [session, popupConnector, network],
   );
 
   const value = useMemo<VendorWalletValue>(
@@ -411,7 +462,7 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
       session,
       network,
       networkSupported,
-      connector: session?.kind === 'passport' || session === null ? connector : null,
+      connector: session?.kind === 'passport' || session === null ? connector : session?.kind === 'pizza' ? pizzaConnector : null,
       connecting,
       connectError,
       connect,
@@ -419,6 +470,7 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
       setConnectModalOpen,
       installedExtensions,
       connectPassport,
+      connectPizza,
       connectExtensionWallet,
       adoptMobileSession,
       disconnect,
@@ -441,6 +493,8 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
       connectModalOpen,
       installedExtensions,
       connectPassport,
+      connectPizza,
+      pizzaConnector,
       connectExtensionWallet,
       adoptMobileSession,
       disconnect,

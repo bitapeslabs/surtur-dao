@@ -119,7 +119,8 @@ export const DAOS: DaoDefinition[] = [
     // SLICE (pizza-data 4:47's `slice`), the voting token.
     votingToken: { alkaneId: '4:8888', symbol: 'SLICE' },
     resolverSigner: 'bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer',
-    proposalThreshold: [{ height: 0, pctg: 0.5 }],
+    // 1.2% of circulating SLICE to create a proposal (the operator, 2026-09-26)
+    proposalThreshold: [{ height: 0, pctg: 1.2 }],
     votePassThreshold: [{ height: 0, pctg: 40 }],
     delegatorThreshold: [{ height: 0, pctg: 0.5 }],
     espoNetwork: 'mainnet',

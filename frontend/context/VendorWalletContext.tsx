@@ -397,9 +397,13 @@ export function VendorWalletProvider({ children }: { children: ReactNode }) {
       switch (session.kind) {
         case 'passport':
         case 'pizza': {
-          // both speak the passport protocol: raw ECDSA over sha256(message), verified by the nodes against publicKey
+          // both speak the passport protocol and answer a BIP-322 simple signature
+          // for the connected address — the nodes verify exactly that, so check it
+          // here first (a wrong scheme fails with diagnostics, not an opaque 400)
           if (!popupConnector) throw new Error('The wallet popup is unavailable.');
-          return popupConnector.signMessage({ message }, { popup: opts?.popup ?? undefined });
+          const result = await popupConnector.signMessage({ message }, { popup: opts?.popup ?? undefined });
+          assertBip322Valid(message, result.address ?? session.account.address, result.signature, session.walletName);
+          return result;
         }
         case 'extension': {
           const signature = await signMessageWithExtension(

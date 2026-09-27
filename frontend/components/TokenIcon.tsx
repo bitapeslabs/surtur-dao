@@ -20,6 +20,8 @@ const SIZE_MAP = {
 const LOCAL_ICONS: Record<string, string> = {
   btc: '/tokens/btc.svg',
   '32:0': '/tokens/frbtc.svg',
+  // SLICE (pizza.fun): the CDN has no icon for it
+  '4:8888': '/tokens/slice.png',
 };
 
 const GRADIENTS = [

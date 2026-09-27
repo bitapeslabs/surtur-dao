@@ -108,12 +108,14 @@ export const DAOS: DaoDefinition[] = [
     name: 'Pizza.fun Foundation',
     description: "Governs pizza.fun's reserves — SLICE holders vote.",
     descriptionZh: '管理 pizza.fun 的储备 — 由 SLICE 持有者投票。',
-    iconUrl: 'https://app.subfrost.io/tokens/cheese-logo.png',
+    // the SLICE token's icon (pizza.fun's), also what TokenIcon shows for 4:8888
+    iconUrl: '/tokens/slice.png',
     enabled: true,
-    // TODO(pizza.fun): confirm the treasury token / address and the resolver —
-    // the team wallet below stands in for both until the operator names them.
+    // NO reserves for now (the operator: "there should be no reserves … set
+    // this to 0"): no treasury address, so nothing shows as Reserves and a
+    // proposal cannot transfer anything. The resolver is the team wallet.
     treasuryToken: { alkaneId: '4:8888', symbol: 'SLICE' },
-    treasuryAddress: 'bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer',
+    treasuryAddress: '',
     // SLICE (pizza-data 4:47's `slice`), the voting token.
     votingToken: { alkaneId: '4:8888', symbol: 'SLICE' },
     resolverSigner: 'bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer',

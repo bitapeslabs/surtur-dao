@@ -23,6 +23,9 @@ import {
   verifyDelegatorBundle,
   verifyDelegationAction,
   verifyDelegatorUpdate,
+  nonCirculatingRequests,
+  subtractNonCirculating,
+  isNonCirculatingAddress,
   type DelegationActionWire,
   type DelegatorBundle,
   type DelegatorUpdateWire,
@@ -85,7 +88,7 @@ function preferStatus(a: string, b: string): string {
  * re-ask espo about a proposal it has already judged. Trust-critical, so
  * it stays CLIENT-side (never delegated to the orchestrator).
  */
-const THRESHOLD_CACHE_KEY = 'surtur:threshold-checks';
+const THRESHOLD_CACHE_KEY = 'surtur:threshold-checks:v2';
 
 class ThresholdVerdictCache {
   private map: Map<string, boolean> | null = null;
@@ -309,6 +312,10 @@ export class NodeDaoStore implements DaoStore {
               method: 'essentials.get_circulating_supply',
               params: { alkane: dao.votingToken.alkaneId, height: row.proposal.startBlock },
             },
+            // the DAO's exclusions at the same height (the pizza.fun DAO's
+            // vaults, treasury, admin, team wallet) — the nodes judge against
+            // the CIRCULATING supply, so must this check
+            ...nonCirculatingRequests(dao, row.proposal.startBlock, `nc-${i}`),
             {
               jsonrpc: '2.0',
               id: `b-${i}`,
@@ -336,16 +343,19 @@ export class NodeDaoStore implements DaoStore {
         );
         list.forEach((row, i) => {
           const dao = this.getDao(row.proposal.daoId)!;
-          const supply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
-          let held = BigInt(
-            String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
-          );
-          (membersByRow.get(row.proposal.id) ?? []).forEach((_, j) => {
+          const rawSupply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
+          const supply = subtractNonCirculating(dao, rawSupply, byId, `nc-${i}`);
+          // an excluded address has no governance power
+          let held = isNonCirculatingAddress(dao, row.proposal.proposer)
+            ? 0n
+            : BigInt(String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0));
+          (membersByRow.get(row.proposal.id) ?? []).forEach((member, j) => {
+            if (isNonCirculatingAddress(dao, member)) return;
             held += BigInt(
               String(byId.get(`m-${i}-${j}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
             );
           });
-          if (supply <= 0n) {
+          if (rawSupply <= 0n) {
             // Espo's versioned view isn't materialized for that block yet
             // (exact-tip race) — trust the node for now, judge next fetch.
             valid.push(row);
@@ -603,6 +613,7 @@ export class NodeDaoStore implements DaoStore {
                 height: bundle.delegator.createdAtBlock,
               },
             },
+            ...nonCirculatingRequests(dao, bundle.delegator.createdAtBlock, `nc-${i}`),
             {
               jsonrpc: '2.0',
               id: `b-${i}`,
@@ -627,11 +638,12 @@ export class NodeDaoStore implements DaoStore {
         );
         list.forEach((bundle, i) => {
           const dao = this.getDao(bundle.delegator.daoId)!;
-          const supply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
-          const held = BigInt(
-            String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
-          );
-          if (supply <= 0n) {
+          const rawSupply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
+          const supply = subtractNonCirculating(dao, rawSupply, byId, `nc-${i}`);
+          const held = isNonCirculatingAddress(dao, bundle.delegator.delegator)
+            ? 0n
+            : BigInt(String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0));
+          if (rawSupply <= 0n) {
             // Versioned view not materialized yet (exact-tip race) —
             // trust the node for now, judge on a later fetch.
             valid.push(bundle);

@@ -4,6 +4,7 @@ import './globals.css';
 import NextTopLoader from 'nextjs-toploader';
 import { VendorWalletProvider } from '@/context/VendorWalletContext';
 import ConnectWalletModal from '@/components/ConnectWalletModal';
+import ExtensionErrorGuard from '@/components/ExtensionErrorGuard';
 import QueryProvider from '@/components/QueryProvider';
 import Header from '@/components/Header';
 import MobileBottomNav from '@/components/MobileBottomNav';
@@ -25,6 +26,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-dvh antialiased">
         {/* White navigation progress bar along the top edge. */}
         <NextTopLoader color="#ececf1" height={2} showSpinner={false} shadow={false} />
+        {/* wallet extensions fighting over window.ethereum are not our runtime errors */}
+        <ExtensionErrorGuard />
         <QueryProvider>
         <VendorWalletProvider>
           <Header />

@@ -22,7 +22,17 @@ export const SUPPORTED_NETWORKS = [
 
 export type VendorNetwork = (typeof SUPPORTED_NETWORKS)[number];
 
-export const DEFAULT_NETWORK: VendorNetwork = 'subfrost-regtest';
+/**
+ * The network assumed while no wallet has reported one (and for a wallet
+ * whose name we do not know): NEXT_PUBLIC_DEFAULT_NETWORK when it names a
+ * supported network — the local test stack sets `mainnet` — else the
+ * SUBFROST regtest, as before.
+ */
+const configuredDefault = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
+export const DEFAULT_NETWORK: VendorNetwork =
+  configuredDefault && (SUPPORTED_NETWORKS as readonly string[]).includes(configuredDefault)
+    ? (configuredDefault as VendorNetwork)
+    : 'subfrost-regtest';
 
 /** Map an arbitrary network name reported by SUBFROST to one we support. */
 export function normalizeNetwork(network: string | undefined | null): VendorNetwork {

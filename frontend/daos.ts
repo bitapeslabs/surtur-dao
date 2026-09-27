@@ -111,11 +111,11 @@ export const DAOS: DaoDefinition[] = [
     // the SLICE token's icon (pizza.fun's), also what TokenIcon shows for 4:8888
     iconUrl: '/tokens/slice.png',
     enabled: true,
-    // NO reserves for now (the operator: "there should be no reserves … set
-    // this to 0"): no treasury address, so nothing shows as Reserves and a
-    // proposal cannot transfer anything. The resolver is the team wallet.
+    // The reserves address (the operator's; an empty address left the Reserves
+    // tile loading forever). Its SLICE balance shows as Reserves and caps what a
+    // proposal may transfer. The resolver is the team wallet.
     treasuryToken: { alkaneId: '4:8888', symbol: 'SLICE' },
-    treasuryAddress: '',
+    treasuryAddress: 'bc1p5slv4trnh68a8y9zcuxvgdz6l599swhgfux27r08lp4cap6qduxspgr636',
     // SLICE (pizza-data 4:47's `slice`), the voting token.
     votingToken: { alkaneId: '4:8888', symbol: 'SLICE' },
     resolverSigner: 'bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer',

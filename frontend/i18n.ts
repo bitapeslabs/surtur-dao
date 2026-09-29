@@ -166,6 +166,11 @@ export const MESSAGES = {
   },
   'dlg.nameRequired': { en: 'Name is required.', zh: '名称为必填项。' },
   'dlg.descriptionRequired': { en: 'Description is required.', zh: '描述为必填项。' },
+  'dlg.nameMissing': { en: 'Enter a delegation name (the title at the top)', zh: '请先填写委托名称（页面顶部的标题）' },
+  'create.titleMissing': { en: 'Enter a title (at the top)', zh: '请先填写标题（页面顶部）' },
+  'eligibility.checking': { en: 'Checking your balance…', zh: '正在检查您的余额…' },
+  'eligibility.failed': { en: 'Your balance could not be checked.', zh: '无法检查您的余额。' },
+  'eligibility.retry': { en: 'Retry', zh: '重试' },
   'dlg.addChinese': { en: 'Add Chinese version', zh: '添加中文版本' },
   'dlg.viaDelegation': { en: 'Delegation', zh: '委托' },
   'dlg.youDelegated': {

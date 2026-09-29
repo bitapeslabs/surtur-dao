@@ -74,6 +74,9 @@ export default function NewProposalPage() {
   } = useVendorWallet();
 
   const [title, setTitle] = useState('');
+  // the title is a borderless input that reads like the page's heading: an empty
+  // one is said next to the Create button, and a tap there focuses it
+  const titleInputRef = useRef<HTMLInputElement>(null);
   // Optional Chinese version — when provided, zh readers see it instead of
   // the English title/body.
   const [withZh, setWithZh] = useState(false);
@@ -343,6 +346,7 @@ export default function NewProposalPage() {
           {dao.name}
         </Link>
         <input
+          ref={titleInputRef}
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -604,7 +608,19 @@ export default function NewProposalPage() {
         </div>
       </section>
 
-      {!eligibility.checking && !eligibility.eligible && (
+      {eligibility.failed ? (
+        <div className="text-sm text-[color:var(--oa-danger)] flex items-center gap-2">
+          {t('eligibility.failed')}
+          <button type="button" className="oa-btn-ghost !px-2" onClick={eligibility.retry}>
+            {t('eligibility.retry')}
+          </button>
+        </div>
+      ) : eligibility.checking ? (
+        <div className="text-sm text-[color:var(--oa-ink-secondary)] flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" />
+          {t('eligibility.checking')}
+        </div>
+      ) : !eligibility.eligible ? (
         <div className="text-sm text-[color:var(--oa-danger)]">
           {t('create.thresholdError', {
             pct: eligibility.requiredPct,
@@ -612,9 +628,21 @@ export default function NewProposalPage() {
             held: eligibility.heldPct ?? 0,
           })}
         </div>
-      )}
+      ) : null}
 
       {error && <div className="text-sm text-[color:var(--oa-danger)]">{error}</div>}
+
+      {/* what keeps Create disabled, on a line of its own (a tap focuses the field) */}
+      {title.trim().length === 0 && (
+        <button
+          type="button"
+          className="self-end text-right text-sm text-[color:var(--oa-danger)] hover:underline"
+          onClick={() => titleInputRef.current?.focus()}
+          data-missing-hint
+        >
+          {t('create.titleMissing')}
+        </button>
+      )}
 
       <div className="flex items-center justify-end gap-2 pb-6">
         <Link href={p(`/proposals/${dao.id}`)} className="oa-btn-secondary">

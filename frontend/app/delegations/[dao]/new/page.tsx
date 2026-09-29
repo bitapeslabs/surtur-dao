@@ -48,6 +48,11 @@ export default function NewDelegationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const descriptionRef = useRef('');
+  // the name is a borderless title input that reads like the page's heading —
+  // a user filled the icon and the description and never saw it (Emmy,
+  // 2026-09-28): what is missing is said next to the button, and a tap on it
+  // focuses the field
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const descriptionZhRef = useRef('');
 
   if (!dao) return null;
@@ -141,6 +146,7 @@ export default function NewDelegationPage() {
           {dao.name}
         </Link>
         <input
+          ref={nameInputRef}
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -210,13 +216,37 @@ export default function NewDelegationPage() {
         </button>
       )}
 
-      {!eligibility.checking && !eligibility.eligible && (
+      {eligibility.failed ? (
+        <div className="text-sm text-[color:var(--oa-danger)] flex items-center gap-2">
+          {t('eligibility.failed')}
+          <button type="button" className="oa-btn-ghost !px-2" onClick={eligibility.retry}>
+            {t('eligibility.retry')}
+          </button>
+        </div>
+      ) : eligibility.checking ? (
+        <div className="text-sm text-[color:var(--oa-ink-secondary)] flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" />
+          {t('eligibility.checking')}
+        </div>
+      ) : !eligibility.eligible ? (
         <div className="text-sm text-[color:var(--oa-danger)]">
           {t('dlg.thresholdNote', { pct: String(eligibility.requiredPct) })}
         </div>
-      )}
+      ) : null}
 
       {error && <div className="text-sm text-[color:var(--oa-danger)]">{error}</div>}
+
+      {/* what keeps Create disabled, on a line of its own (a tap focuses the field) */}
+      {name.trim().length === 0 && (
+        <button
+          type="button"
+          className="self-end text-right text-sm text-[color:var(--oa-danger)] hover:underline"
+          onClick={() => nameInputRef.current?.focus()}
+          data-missing-hint
+        >
+          {t('dlg.nameMissing')}
+        </button>
+      )}
 
       <div className="flex items-center justify-end gap-2 pb-6">
         <Link href={p(`/proposals/${dao.id}?view=delegations`)} className="oa-btn-secondary">

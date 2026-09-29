@@ -34,6 +34,10 @@ export interface ProposerEligibility {
   heldPct: number | null;
   /** Absolute voting-token amount (base units) required, when known. */
   requiredAmount: bigint | null;
+  /** The balance read FAILED (espo down / unreachable): say so and offer a retry
+   *  instead of a button that stays disabled with no reason. */
+  failed?: boolean;
+  retry?: () => void;
 }
 
 export function useProposerEligibility(
@@ -98,6 +102,9 @@ export function useProposerEligibility(
   }
 
   if (!share.data) {
+    if (share.isError) {
+      return { eligible: false, checking: false, failed: true, retry: () => void share.refetch(), requiredPct, heldPct: null, requiredAmount: null };
+    }
     return { eligible: false, checking: true, requiredPct, heldPct: null, requiredAmount: null };
   }
 

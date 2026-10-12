@@ -1,4 +1,11 @@
-import { isNonCirculatingAddress, nonCirculatingRequests, subtractNonCirculating } from '@surtur/shared';
+import {
+  isNonCirculatingAddress,
+  nonCirculatingRequests,
+  subtractNonCirculating,
+  vaultUnclaimed,
+  type EspoBatch,
+  type VaultUnclaimed,
+} from '@surtur/shared';
 /**
  * Governance-token reads from Espo (essentials module + root methods, espo
  * v3.0.0-rc3 API), parameterized by DAO — each DaoDefinition names its
@@ -90,6 +97,37 @@ async function espoBatch(
     results.set(request.id, envelope.result);
   }
   return results;
+}
+
+/** The shared vault reader's view of one network's espo (`vaultPower.ts`). */
+const espoFor =
+  (network: string): EspoBatch =>
+  (requests) =>
+    espoBatch(network, requests as EspoRequest[]);
+
+/**
+ * UNCLAIMED SLICE COUNTS: every position's unclaimed emission joins the circulating supply, and
+ * each holder's joins their balance in the holders list (an address only the vault knows becomes
+ * a holder). A DAO without vaults is untouched. Read at the same height as the rest.
+ */
+async function withVaultPower(
+  dao: DaoDefinition,
+  atHeight: number | undefined,
+  supply: bigint,
+  holders: TokenHolder[],
+): Promise<{ supply: bigint; holders: TokenHolder[] }> {
+  if (!dao.vaultPositions) return { supply, holders };
+  const unclaimed = await vaultUnclaimed(dao, espoFor(dao.espoNetwork), atHeight);
+  return { supply: supply + unclaimed.total, holders: holdersWithUnclaimed(holders, unclaimed) };
+}
+
+function holdersWithUnclaimed(holders: TokenHolder[], unclaimed: VaultUnclaimed): TokenHolder[] {
+  if (unclaimed.byAddress.size === 0) return holders;
+  const byAddress = new Map(holders.map((h) => [h.address, h.amount]));
+  for (const [address, amount] of unclaimed.byAddress) byAddress.set(address, (byAddress.get(address) ?? 0n) + amount);
+  return [...byAddress]
+    .map(([address, amount]) => ({ address, amount }))
+    .sort((a, b) => (a.amount === b.amount ? 0 : a.amount > b.amount ? -1 : 1));
 }
 
 function parseSupply(result: any): bigint {
@@ -221,9 +259,10 @@ export async function fetchGovernanceSnapshot(
   const hasTreasury = dao.treasuryAddress.length > 0;
   if (hasTreasury) requests.push(reservesRequest(dao, atHeight));
   const results = await espoBatch(dao.espoNetwork, requests, PRICE_IDS);
+  const { supply, holders } = await withVaultPower(dao, atHeight, circulatingOf(dao, results), parseHolders(results.get('holders'), dao));
   return {
-    supply: circulatingOf(dao, results),
-    holders: parseHolders(results.get('holders'), dao),
+    supply,
+    holders,
     reserves: hasTreasury ? parseReserves(dao, results.get('reserves')) : 0n,
     treasuryUsd: parseTreasuryUsd(dao, results),
   };
@@ -313,18 +352,22 @@ export async function fetchProposerShare(
       params: { address: member },
     })),
   ]);
+  // the unclaimed SLICE of the proposer's and the members' vault positions counts as held
+  const unclaimed = dao.vaultPositions ? await vaultUnclaimed(dao, espoFor(dao.espoNetwork)) : null;
+  const unclaimedOf = (a: string) => unclaimed?.byAddress.get(a) ?? 0n;
   let memberHeld = 0n;
-  memberAddresses.forEach((_, i) => {
+  memberAddresses.forEach((member, i) => {
     memberHeld += BigInt(
       String(results.get(`member-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
     );
+    memberHeld += unclaimedOf(member);
   });
   return {
-    supply: circulatingOf(dao, results),
+    supply: circulatingOf(dao, results) + (unclaimed?.total ?? 0n),
     // an excluded address holds nothing that counts
     held: isNonCirculatingAddress(dao, address)
       ? 0n
-      : memberHeld + BigInt(String(results.get('holder-balance')?.balances?.[dao.votingToken.alkaneId] ?? 0)),
+      : memberHeld + unclaimedOf(address) + BigInt(String(results.get('holder-balance')?.balances?.[dao.votingToken.alkaneId] ?? 0)),
   };
 }
 
@@ -346,12 +389,20 @@ export async function fetchVerdictSnapshots(
     ...nonCirculatingRequests(dao, e.endBlock, `nc:${e.proposalId}`),
   ]);
   const results = await espoBatch(dao.espoNetwork, requests);
-  for (const e of entries) {
-    snapshots.set(e.proposalId, {
-      supply: circulatingOf(dao, results, `supply:${e.proposalId}`, `nc:${e.proposalId}`),
-      holders: parseHolders(results.get(`holders:${e.proposalId}`), dao),
-    });
-  }
+  // each proposal's vault figures at ITS end block
+  await Promise.all(
+    entries.map(async (e) => {
+      snapshots.set(
+        e.proposalId,
+        await withVaultPower(
+          dao,
+          e.endBlock,
+          circulatingOf(dao, results, `supply:${e.proposalId}`, `nc:${e.proposalId}`),
+          parseHolders(results.get(`holders:${e.proposalId}`), dao),
+        ),
+      );
+    }),
+  );
   return snapshots;
 }
 
@@ -367,8 +418,5 @@ export async function fetchSupplyAndHolders(
     holdersRequest(dao, atHeight),
     ...nonCirculatingRequests(dao, atHeight),
   ]);
-  return {
-    supply: circulatingOf(dao, results),
-    holders: parseHolders(results.get('holders'), dao),
-  };
+  return withVaultPower(dao, atHeight, circulatingOf(dao, results), parseHolders(results.get('holders'), dao));
 }

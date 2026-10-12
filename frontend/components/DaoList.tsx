@@ -11,7 +11,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
-import { DAOS, type DaoDefinition } from '@/daos';
+import { VISIBLE_DAOS, type DaoDefinition } from '@/daos';
 import { daoDescription } from '@/i18n';
 import { useI18n } from '@/hooks/useI18n';
 
@@ -79,7 +79,7 @@ export default function DaoList({
 
       <section className="rounded-2xl overflow-hidden bg-[color:var(--oa-bg-raised)]">
         <div className="divide-y divide-[color:var(--oa-border)]">
-          {DAOS.map((dao) =>
+          {VISIBLE_DAOS.map((dao) =>
             dao.enabled ? (
               <Link
                 key={dao.id}

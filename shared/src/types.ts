@@ -1,3 +1,4 @@
+import type { VaultPositions } from './vaultPower';
 /** Wire types exchanged between the frontend and surtur nodes. */
 
 export interface TransferWire {
@@ -138,6 +139,8 @@ export interface OrchestratorDao {
   resolverSigner: string;
   /** Holders whose voting token is not circulating (see `NonCirculating`). */
   nonCirculating?: NonCirculating;
+  /** The vaults whose UNCLAIMED emission counts as held and circulating (see `vaultPower.ts`). */
+  vaultPositions?: VaultPositions;
   /** Fork-height schedule for the create-proposal threshold. */
   proposalThreshold: ThresholdSchedule;
   /** Fork-height schedule for the vote-pass threshold. */

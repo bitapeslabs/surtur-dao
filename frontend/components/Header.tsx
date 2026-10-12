@@ -16,7 +16,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { effectiveDelegatorMeta } from '@surtur/shared';
 import { ScrollText } from 'lucide-react';
-import { DAOS } from '@/daos';
+import { VISIBLE_DAOS } from '@/daos';
 import { getDaoStore } from '@/lib/dao/store';
 import { useVendorWallet } from '@/context/VendorWalletContext';
 import { useI18n } from '@/hooks/useI18n';
@@ -81,7 +81,7 @@ export default function Header() {
 
   // When the connected wallet owns a delegation (in any enabled DAO),
   // the account button wears the delegation's identity.
-  const enabledDaoIds = DAOS.filter((d) => d.enabled).map((d) => d.id);
+  const enabledDaoIds = VISIBLE_DAOS.filter((d) => d.enabled).map((d) => d.id);
   const myDelegationQuery = useQuery({
     queryKey: ['nodes', 'my-delegation', session?.account.address, enabledDaoIds.join(',')],
     queryFn: async () => {

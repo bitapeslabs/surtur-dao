@@ -3,7 +3,7 @@
  * pass `height` to read the world as of a block.
  */
 
-import { isNonCirculatingAddress, nonCirculatingRequests, subtractNonCirculating } from '@surtur/shared';
+import { isNonCirculatingAddress, nonCirculatingRequests, subtractNonCirculating, vaultUnclaimed } from '@surtur/shared';
 import {
   computeDelegatedTally,
   resolveDelegationState,
@@ -99,13 +99,17 @@ async function shareMeets(
         params: { address: extra, ...h },
       })),
     ]);
+    // UNCLAIMED SLICE COUNTS: the vaults' unclaimed emission at the same height joins the supply,
+    // and the address's (and its members') positions' unclaimed joins what it holds
+    const unclaimed = dao.vaultPositions ? await vaultUnclaimed(dao, (r) => espoBatch(dao.espoUrl, r), height) : null;
+    const unclaimedOf = (a: string) => unclaimed?.byAddress.get(a) ?? 0n;
     // an address the DAO keeps out of circulation holds nothing that counts
-    let held = isNonCirculatingAddress(dao, address) ? 0n : votingBalanceOf(dao, results.get('balance'));
+    let held = isNonCirculatingAddress(dao, address) ? 0n : votingBalanceOf(dao, results.get('balance')) + unclaimedOf(address);
     extraAddresses.forEach((extra, i) => {
-      if (!isNonCirculatingAddress(dao, extra)) held += votingBalanceOf(dao, results.get(`extra-${i}`));
+      if (!isNonCirculatingAddress(dao, extra)) held += votingBalanceOf(dao, results.get(`extra-${i}`)) + unclaimedOf(extra);
     });
     return {
-      supply: subtractNonCirculating(dao, BigInt(String(results.get('supply')?.supply ?? 0)), results),
+      supply: subtractNonCirculating(dao, BigInt(String(results.get('supply')?.supply ?? 0)), results) + (unclaimed?.total ?? 0n),
       held,
     };
   };
@@ -125,7 +129,7 @@ async function shareMeets(
   return state.held >= thresholdPower(state.supply, pctg);
 }
 
-/** A vote is valid from any address holding ANY amount of the voting token. */
+/** A vote is valid from any address holding ANY amount of the voting token — in its wallet, or unclaimed in a vault position. */
 export async function voterHoldsToken(dao: OrchestratorDao, address: string): Promise<boolean> {
   // an address the DAO keeps out of circulation cannot vote
   if (isNonCirculatingAddress(dao, address)) return false;
@@ -137,7 +141,10 @@ export async function voterHoldsToken(dao: OrchestratorDao, address: string): Pr
       params: { address },
     },
   ]);
-  return votingBalanceOf(dao, results.get('balance')) > 0n;
+  if (votingBalanceOf(dao, results.get('balance')) > 0n) return true;
+  if (!dao.vaultPositions) return false;
+  const unclaimed = await vaultUnclaimed(dao, (r) => espoBatch(dao.espoUrl, r));
+  return (unclaimed.byAddress.get(address) ?? 0n) > 0n;
 }
 
 /**
@@ -199,11 +206,16 @@ export async function computeVerdict(
     })),
   ];
   const results = await espoBatch(dao.espoUrl, requests);
-  const supply = subtractNonCirculating(dao, BigInt(String(results.get('supply')?.supply ?? 0)), results);
+  // the vaults' unclaimed SLICE at the end block: the supply and every priced address's balance
+  const unclaimed = dao.vaultPositions ? await vaultUnclaimed(dao, (r) => espoBatch(dao.espoUrl, r), endBlock) : null;
+  const supply = subtractNonCirculating(dao, BigInt(String(results.get('supply')?.supply ?? 0)), results) + (unclaimed?.total ?? 0n);
   const balances = new Map<string, bigint>();
   addresses.forEach((address, i) => {
     // an excluded address's balance carries no power, however it voted
-    balances.set(address, isNonCirculatingAddress(dao, address) ? 0n : votingBalanceOf(dao, results.get(`bal-${i}`)));
+    balances.set(
+      address,
+      isNonCirculatingAddress(dao, address) ? 0n : votingBalanceOf(dao, results.get(`bal-${i}`)) + (unclaimed?.byAddress.get(address) ?? 0n),
+    );
   });
 
   const tally = computeDelegatedTally({

@@ -33,6 +33,8 @@ import {
   type ProposalWire,
   type ResolutionWire,
   type VoteWire,
+  vaultUnclaimed,
+  type EspoBatch,
 } from '@surtur/shared';
 import type { DaoDefinition } from '@/daos';
 import { getEspoUrl } from '@/lib/config';
@@ -127,6 +129,21 @@ class ThresholdVerdictCache {
     }
   }
 }
+
+/** One network's espo for the shared vault reader (`vaultPower.ts`): a batch POST, results by id. */
+const espoBatchFor =
+  (network: string): EspoBatch =>
+  async (requests) => {
+    const res = await fetch(getEspoUrl(network), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requests),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`espo ${res.status}`);
+    const json = await res.json();
+    return new Map((Array.isArray(json) ? json : [json]).map((e: any) => [String(e?.id), e?.result]));
+  };
 
 const thresholdVerdictCache = new ThresholdVerdictCache();
 
@@ -341,19 +358,29 @@ export class NodeDaoStore implements DaoStore {
         const byId = new Map(
           (Array.isArray(json) ? json : [json]).map((e: any) => [String(e?.id), e?.result]),
         );
+        // the vaults' unclaimed SLICE at each start block: it joins the supply and the proposer's held
+        const unclaimedByRow = await Promise.all(
+          list.map((row) => {
+            const dao = this.getDao(row.proposal.daoId)!;
+            return dao.vaultPositions ? vaultUnclaimed(dao, espoBatchFor(network), row.proposal.startBlock) : null;
+          }),
+        );
         list.forEach((row, i) => {
           const dao = this.getDao(row.proposal.daoId)!;
+          const unclaimed = unclaimedByRow[i];
+          const unclaimedOf = (a: string) => unclaimed?.byAddress.get(a) ?? 0n;
           const rawSupply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
-          const supply = subtractNonCirculating(dao, rawSupply, byId, `nc-${i}`);
+          const supply = subtractNonCirculating(dao, rawSupply, byId, `nc-${i}`) + (unclaimed?.total ?? 0n);
           // an excluded address has no governance power
           let held = isNonCirculatingAddress(dao, row.proposal.proposer)
             ? 0n
-            : BigInt(String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0));
+            : BigInt(String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0)) + unclaimedOf(row.proposal.proposer);
           (membersByRow.get(row.proposal.id) ?? []).forEach((member, j) => {
             if (isNonCirculatingAddress(dao, member)) return;
             held += BigInt(
               String(byId.get(`m-${i}-${j}`)?.balances?.[dao.votingToken.alkaneId] ?? 0),
             );
+            held += unclaimedOf(member);
           });
           if (rawSupply <= 0n) {
             // Espo's versioned view isn't materialized for that block yet
@@ -636,13 +663,21 @@ export class NodeDaoStore implements DaoStore {
         const byId = new Map(
           (Array.isArray(json) ? json : [json]).map((e: any) => [String(e?.id), e?.result]),
         );
+        const unclaimedByRow = await Promise.all(
+          list.map((bundle) => {
+            const dao = this.getDao(bundle.delegator.daoId)!;
+            return dao.vaultPositions ? vaultUnclaimed(dao, espoBatchFor(network), bundle.delegator.createdAtBlock) : null;
+          }),
+        );
         list.forEach((bundle, i) => {
           const dao = this.getDao(bundle.delegator.daoId)!;
+          const unclaimed = unclaimedByRow[i];
           const rawSupply = BigInt(String(byId.get(`s-${i}`)?.supply ?? 0));
-          const supply = subtractNonCirculating(dao, rawSupply, byId, `nc-${i}`);
+          const supply = subtractNonCirculating(dao, rawSupply, byId, `nc-${i}`) + (unclaimed?.total ?? 0n);
           const held = isNonCirculatingAddress(dao, bundle.delegator.delegator)
             ? 0n
-            : BigInt(String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0));
+            : BigInt(String(byId.get(`b-${i}`)?.balances?.[dao.votingToken.alkaneId] ?? 0)) +
+              (unclaimed?.byAddress.get(bundle.delegator.delegator) ?? 0n);
           if (rawSupply <= 0n) {
             // Versioned view not materialized yet (exact-tip race) —
             // trust the node for now, judge on a later fetch.

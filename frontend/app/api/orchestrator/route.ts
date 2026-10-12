@@ -26,6 +26,7 @@ export async function GET() {
       votePassThreshold: dao.votePassThreshold,
       delegatorThreshold: dao.delegatorThreshold,
       nonCirculating: dao.nonCirculating,
+      vaultPositions: dao.vaultPositions,
       espoNetwork: dao.espoNetwork,
       espoUrl: getEspoUrl(dao.espoNetwork),
     })),

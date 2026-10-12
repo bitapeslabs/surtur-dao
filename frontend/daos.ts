@@ -4,7 +4,8 @@
  * these definitions. Add a DAO by appending to DAOS.
  */
 
-import type { NonCirculating, ThresholdSchedule } from '@surtur/shared';
+import type { NonCirculating, ThresholdSchedule, VaultPositions } from '@surtur/shared';
+import { HIDE_DAO } from '@/consts';
 
 export interface DaoToken {
   /** Alkane id, "block:tx". */
@@ -75,6 +76,14 @@ export interface DaoDefinition {
    * re-checked client-side (shared `circulating.ts`).
    */
   nonCirculating?: NonCirculating;
+  /**
+   * UNCLAIMED SLICE COUNTS (2026 10 11): the vaults whose positions earn the voting token hold
+   * it until it is claimed, and the DAO excludes the vaults from circulation — so a position's
+   * unclaimed emission counts for its HOLDER's power and joins the circulating supply, read from
+   * the vaults' own records at the same height (shared `vaultPower.ts`). Enforced by surtur
+   * nodes AND re-checked client-side.
+   */
+  vaultPositions?: VaultPositions;
 }
 
 export const DAOS: DaoDefinition[] = [
@@ -131,10 +140,18 @@ export const DAOS: DaoDefinition[] = [
       alkanes: ['4:53', '4:54', '4:55', '4:56'],
       addresses: ['bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer'],
     },
+    // the TORTILLA vault 4:55 and the wTACO vault 4:56; every position is a clone of the token
+    // template 4:45. From block 971,000 (2026 10 11): what was judged before keeps its verdict.
+    vaultPositions: { vaults: ['4:55', '4:56'], tokenFactory: '4:45', fromHeight: 971_000 },
   },
 ];
 
+/** Every DAO the site SHOWS: the registry less `HIDE_DAO` (hidden, never deleted). */
+export const VISIBLE_DAOS: DaoDefinition[] = DAOS.filter((d) => !HIDE_DAO.includes(d.id));
+
+/** A DAO by id — null for an unknown id AND for a hidden one, so no page or route reaches it. */
 export function getDao(id: string | undefined | null): DaoDefinition | null {
+  if (!id || HIDE_DAO.includes(id)) return null;
   return DAOS.find((d) => d.id === id) ?? null;
 }
 

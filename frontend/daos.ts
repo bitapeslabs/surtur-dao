@@ -129,7 +129,12 @@ export const DAOS: DaoDefinition[] = [
     votingToken: { alkaneId: '4:8888', symbol: 'SLICE' },
     resolverSigner: 'bc1pz860hkyek9584tx5l84pyax5puu7crerspaksz0jen2svww3ce2smzyjer',
     // 1.2% of circulating SLICE to create a proposal (the operator, 2026-09-26)
-    proposalThreshold: [{ height: 0, pctg: 1.2 }],
+    // 1.2% at launch; 0.5% from block 971,040 (2026 10 11, the operator: "lower it to 0.5%") — a
+    // fork entry, so proposals opened before it keep the bar they were judged against
+    proposalThreshold: [
+      { height: 0, pctg: 1.2 },
+      { height: 971_040, pctg: 0.5 },
+    ],
     votePassThreshold: [{ height: 0, pctg: 40 }],
     delegatorThreshold: [{ height: 0, pctg: 0.5 }],
     espoNetwork: 'mainnet',

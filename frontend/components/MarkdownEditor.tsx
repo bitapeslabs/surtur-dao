@@ -14,13 +14,22 @@
  * The instance is created once on mount; `defaultValue` is intentionally
  * not reactive (Crepe owns the document after init). Read the current
  * markdown through `onChange` or hold your own ref via `onReady`.
+ *
+ * PASTE MARKDOWN (the operator, 2026 10 11: "on a block I can 'Paste markdown' and
+ * it converts it into the blocks surtur expects"): ProseMirror pastes raw markdown
+ * as literal text ("# Title" stays a paragraph with a hash). The editable editor
+ * carries a "Paste markdown" button opening a small modal with a textarea; its text
+ * is PARSED by milkdown — headings, lists, quotes, code, links, images, tables
+ * become the editor's own blocks — and inserted at the cursor (`insert`) or put in
+ * place of the whole document (`replaceAll`).
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { ClipboardPaste, X } from 'lucide-react';
 import { Crepe } from '@milkdown/crepe';
 import { editorViewOptionsCtx } from '@milkdown/kit/core';
 import { Slice } from '@milkdown/kit/prose/model';
+import { insert, replaceAll } from '@milkdown/kit/utils';
 // Crepe theme CSS is imported in app/globals.css so the oa variable remap
 // there stays later in the cascade.
 import { imageFileSchema } from '@/lib/dao/schemas';
@@ -78,9 +87,14 @@ export default function MarkdownEditor({
   className?: string;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const crepeRef = useRef<Crepe | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // the Paste markdown modal: its text, and whether it is open
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const pasteAreaRef = useRef<HTMLTextAreaElement>(null);
   const { locale, t } = useI18n();
   const localeRef = useRef(locale);
   localeRef.current = locale;
@@ -96,6 +110,26 @@ export default function MarkdownEditor({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [lightboxSrc]);
+
+  useEffect(() => {
+    if (!pasteOpen) return;
+    pasteAreaRef.current?.focus();
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPasteOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [pasteOpen]);
+
+  /** Parse the pasted markdown into blocks: at the cursor, or in place of everything. */
+  const applyPaste = (mode: 'insert' | 'replace') => {
+    const crepe = crepeRef.current;
+    const markdown = pasteText.trim();
+    if (!crepe || !markdown) return;
+    crepe.editor.action(mode === 'replace' ? replaceAll(markdown, true) : insert(markdown));
+    setPasteText('');
+    setPasteOpen(false);
+  };
 
   useEffect(() => {
     const root = rootRef.current;
@@ -162,8 +196,10 @@ export default function MarkdownEditor({
 
     if (readonly) crepe.setReadonly(true);
     crepe.create();
+    crepeRef.current = crepe;
 
     return () => {
+      crepeRef.current = null;
       void crepe.destroy();
     };
     // Mount-once by design; see the component docblock.
@@ -196,6 +232,53 @@ export default function MarkdownEditor({
       />
       {uploadError && (
         <div className="px-5 pb-3 text-xs text-[color:var(--oa-danger)]">{uploadError}</div>
+      )}
+      {!readonly && (
+        <div className="flex justify-end px-3 pb-2">
+          <button type="button" className="oa-btn-ghost" onClick={() => setPasteOpen(true)}>
+            <ClipboardPaste size={14} />
+            {t('editor.pasteMarkdown')}
+          </button>
+        </div>
+      )}
+      {pasteOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPasteOpen(false)}
+        >
+          <div
+            className="w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl bg-[color:var(--oa-bg-raised)] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-[color:var(--oa-border)] flex items-center justify-between">
+              <h2 className="text-sm font-medium">{t('editor.pasteMarkdownTitle')}</h2>
+              <button type="button" className="oa-btn-ghost !px-1.5" onClick={() => setPasteOpen(false)} aria-label={t('editor.close')}>
+                <X size={15} />
+              </button>
+            </div>
+            <div className="p-4 flex flex-col gap-3">
+              <p className="text-xs text-[color:var(--oa-ink-secondary)]">{t('editor.pasteMarkdownHint')}</p>
+              <textarea
+                ref={pasteAreaRef}
+                className="oa-input font-mono text-xs leading-relaxed min-h-[18rem] resize-y"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder={t('editor.pasteMarkdownPlaceholder')}
+                spellCheck={false}
+              />
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                <button type="button" className="oa-btn-secondary" disabled={!pasteText.trim()} onClick={() => applyPaste('replace')}>
+                  {t('editor.replaceAll')}
+                </button>
+                <button type="button" className="oa-btn-primary" disabled={!pasteText.trim()} onClick={() => applyPaste('insert')}>
+                  {t('editor.insertAtCursor')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
       {lightboxSrc && (
         <div

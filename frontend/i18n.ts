@@ -100,6 +100,17 @@ export const MESSAGES = {
 
   // Proposal detail
   'prop.notFound': { en: 'Proposal not found', zh: '未找到提案' },
+  // The editor's Paste markdown modal
+  'editor.pasteMarkdown': { en: 'Paste markdown', zh: '粘贴 Markdown' },
+  'editor.pasteMarkdownTitle': { en: 'Paste markdown', zh: '粘贴 Markdown' },
+  'editor.pasteMarkdownHint': {
+    en: 'Headings, lists, quotes, code, links, images and tables become blocks of the proposal.',
+    zh: '标题、列表、引用、代码、链接、图片和表格都会转换为提案的区块。',
+  },
+  'editor.pasteMarkdownPlaceholder': { en: '# Title\n\nYour markdown here…', zh: '# 标题\n\n在此粘贴 Markdown…' },
+  'editor.insertAtCursor': { en: 'Insert at cursor', zh: '插入到光标处' },
+  'editor.replaceAll': { en: 'Replace everything', zh: '替换全部内容' },
+  'editor.close': { en: 'Close', zh: '关闭' },
   'prop.backToProposals': { en: 'Back to proposals', zh: '返回提案列表' },
   'prop.transfersProposed': { en: 'Transfers proposed', zh: '提议的转账' },
   'prop.amount': { en: 'Amount', zh: '金额' },
